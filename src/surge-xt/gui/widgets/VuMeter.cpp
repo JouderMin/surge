@@ -1,17 +1,24 @@
 /*
-** Surge Synthesizer is Free and Open Source Software
-**
-** Surge is made available under the Gnu General Public License, v3.0
-** https://www.gnu.org/licenses/gpl-3.0.en.html
-**
-** Copyright 2004-2021 by various individuals as described by the Git transaction log
-**
-** All source at: https://github.com/surge-synthesizer/surge.git
-**
-** Surge was a commercial product from 2004-2018, with Copyright and ownership
-** in that period held by Claes Johanson at Vember Audio. Claes made Surge
-** open source in September 2018.
-*/
+ * Surge XT - a free and open source hybrid synthesizer,
+ * built by Surge Synth Team
+ *
+ * Learn more at https://surge-synthesizer.github.io/
+ *
+ * Copyright 2018-2023, various authors, as described in the GitHub
+ * transaction log.
+ *
+ * Surge XT is released under the GNU General Public Licence v3
+ * or later (GPL-3.0-or-later). The license is found in the "LICENSE"
+ * file in the root of this repository, or at
+ * https://www.gnu.org/licenses/gpl-3.0.en.html
+ *
+ * Surge was a commercial product from 2004-2018, copyright and ownership
+ * held by Claes Johanson at Vember Audio during that period.
+ * Claes made Surge open source in September 2018.
+ *
+ * All source for Surge XT is available at
+ * https://github.com/surge-synthesizer/surge
+ */
 
 #include "VuMeter.h"
 #include "SurgeImageStore.h"
@@ -27,9 +34,25 @@ VuMeter::VuMeter() : juce::Component(), WidgetBaseMixin<VuMeter>(this)
 {
     setAccessible(false);
     setWantsKeyboardFocus(false);
-    setInterceptsMouseClicks(false, false);
 }
+
 VuMeter::~VuMeter() = default;
+
+void VuMeter::mouseDown(const juce::MouseEvent &event)
+{
+    if (forwardedMainFrameMouseDowns(event))
+    {
+        return;
+    }
+
+    if (event.mods.isPopupMenu())
+    {
+        notifyControlModifierClicked(event.mods);
+        return;
+    }
+
+    mouseDownLongHold(event);
+}
 
 void VuMeter::paint(juce::Graphics &g)
 {
@@ -52,8 +75,10 @@ void VuMeter::paint(juce::Graphics &g)
                    juce::Justification::centred);
         return;
     }
+
     int offi;
     bool stereo = false;
+
     switch (vu_type)
     {
     case ParamConfig::vut_vu:
@@ -70,10 +95,13 @@ void VuMeter::paint(juce::Graphics &g)
         offi = 0;
         break;
     }
+
     auto t = juce::AffineTransform().translated(0, -offi * getHeight());
 
     if (hVuBars)
+    {
         hVuBars->draw(g, 1.0, t);
+    }
 
     // And now the calculation
     float w = getWidth();
@@ -95,13 +123,14 @@ void VuMeter::paint(juce::Graphics &g)
     {
         float occludeTo = std::min((scale(vL) * (w - 1)) - zerodb, 0.f); // Strictly negative
         auto dG = getLocalBounds().reduced(1, 1).withTrimmedRight(-occludeTo);
+
         g.setColour(bgCol);
         g.fillRect(dG);
     }
     else
     {
-        auto dL = getLocalBounds().reduced(1, 1);
-        auto dR = getLocalBounds().reduced(1, 1);
+        auto dL = getLocalBounds().reduced(2, 2);
+        auto dR = getLocalBounds().reduced(2, 2);
 
         auto occludeFromL = scale(vL) * w;
         auto occludeFromR = scale(vR) * w;
@@ -116,8 +145,43 @@ void VuMeter::paint(juce::Graphics &g)
         dR = dR.withTrimmedLeft(occludeFromR);
         g.setColour(bgCol);
         g.fillRect(dL);
+
         if (stereo)
+        {
             g.fillRect(dR);
+        }
+    }
+
+    if (storage)
+    {
+        bool showCPU =
+            Surge::Storage::getUserDefaultValue(storage, Surge::Storage::ShowCPUUsage, false);
+
+        if (showCPU)
+        {
+            if (cpuLevel < 0.33)
+            {
+                g.setColour(juce::Colour(juce::Colours::white));
+            }
+            else if (cpuLevel < 0.66)
+            {
+                g.setColour(juce::Colour(juce::Colours::yellow));
+            }
+            else if (cpuLevel < 0.95)
+            {
+                g.setColour(juce::Colour(juce::Colours::orange));
+            }
+            else
+            {
+                g.setColour(juce::Colour(juce::Colours::red));
+            }
+
+            std::string text = std::to_string((int)(std::min(cpuLevel, 1.f) * 100.f));
+            auto bounds = getLocalBounds().withTrimmedRight(3);
+
+            g.setFont(skin->fontManager->getLatoAtSize(9));
+            g.drawText(text, bounds, juce::Justification::right);
+        }
     }
 }
 

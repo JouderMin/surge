@@ -1,19 +1,27 @@
 /*
-** Surge Synthesizer is Free and Open Source Software
-**
-** Surge is made available under the Gnu General Public License, v3.0
-** https://www.gnu.org/licenses/gpl-3.0.en.html
-**
-** Copyright 2004-2020 by various individuals as described by the Git transaction log
-**
-** All source at: https://github.com/surge-synthesizer/surge.git
-**
-** Surge was a commercial product from 2004-2018, with Copyright and ownership
-** in that period held by Claes Johanson at Vember Audio. Claes made Surge
-** open source in September 2018.
-*/
+ * Surge XT - a free and open source hybrid synthesizer,
+ * built by Surge Synth Team
+ *
+ * Learn more at https://surge-synthesizer.github.io/
+ *
+ * Copyright 2018-2023, various authors, as described in the GitHub
+ * transaction log.
+ *
+ * Surge XT is released under the GNU General Public Licence v3
+ * or later (GPL-3.0-or-later). The license is found in the "LICENSE"
+ * file in the root of this repository, or at
+ * https://www.gnu.org/licenses/gpl-3.0.en.html
+ *
+ * Surge was a commercial product from 2004-2018, copyright and ownership
+ * held by Claes Johanson at Vember Audio during that period.
+ * Claes made Surge open source in September 2018.
+ *
+ * All source for Surge XT is available at
+ * https://github.com/surge-synthesizer/surge
+ */
 
-#pragma once
+#ifndef SURGE_SRC_COMMON_DSP_MODULATORS_ADSRMODULATIONSOURCE_H
+#define SURGE_SRC_COMMON_DSP_MODULATORS_ADSRMODULATIONSOURCE_H
 
 #include "DSPUtils.h"
 #include "SurgeStorage.h"
@@ -77,16 +85,36 @@ class ADSRModulationSource : public ModulationSource
             attack();
     }
 
-    virtual void attack() override
+    virtual void attack() override { attackFrom(0.f); }
+
+    virtual void attackFrom(float start)
     {
         phase = 0;
         output = 0;
         idlecount = 0;
         scalestage = 1.f;
 
+        if (start > 0)
+        {
+            output = start;
+            switch (lc[a_s].i)
+            {
+            case 0:
+                // output = sqrt(phase);
+                phase = output * output;
+                break;
+            case 1:
+                phase = output;
+                break;
+            case 2:
+                // output = phase * phase;
+                phase = sqrt(output);
+                break;
+            };
+        }
         // Reset the analog state machine too
-        _v_c1 = 0.f;
-        _v_c1_delayed = 0.f;
+        _v_c1 = start;
+        _v_c1_delayed = start;
         _discharge = 0.f;
 
         envstate = s_attack;
@@ -136,10 +164,16 @@ class ADSRModulationSource : public ModulationSource
         envstate = s_uberrelease;
     }
     bool is_idle() { return (envstate == s_idle) && (idlecount > 0); }
+    bool correctAnalogMode{false};
     virtual void process_block() override
     {
         if (lc[mode].b)
         {
+            if (correctAnalogMode)
+            {
+                doCorrectAnalogMode();
+                return;
+            }
             /*
             ** This is the "analog" mode of the envelope. If you are unclear what it is doing
             ** because of the SSE the algo is pretty simple; charge up and discharge a capacitor
@@ -353,6 +387,57 @@ class ADSRModulationSource : public ModulationSource
         }
     }
 
+    void doCorrectAnalogMode()
+    {
+        const float coeff_offset = 2.f - log(storage->samplerate / BLOCK_SIZE) / log(2.f);
+
+        float coef_A = powf(
+            2.f, std::min(0.f, coeff_offset -
+                                   lc[a].f * (adsr->a.temposync ? storage->temposyncratio : 1.f)));
+        float coef_D = powf(
+            2.f, std::min(0.f, coeff_offset -
+                                   lc[d].f * (adsr->d.temposync ? storage->temposyncratio : 1.f)));
+        float coef_R =
+            envstate == s_uberrelease
+                ? 6.f
+                : powf(2.f, std::min(0.f, coeff_offset - lc[r].f * (adsr->r.temposync
+                                                                        ? storage->temposyncratio
+                                                                        : 1.f)));
+
+        const float v_cc = 1.01f;
+        auto gate = (envstate == s_attack) || (envstate == s_decay);
+        float v_gate = gate ? v_cc : 0.f;
+
+        // discharge = _mm_and_ps(_mm_or_ps(_mm_cmpgt_ss(v_c1_delayed, one), discharge),
+        // v_gate);
+        corr_discharge = ((corr_v_c1_delayed >= 1) || corr_discharge) && gate;
+        corr_v_c1_delayed = corr_v_c1;
+
+        float sparm = limit_range(lc[s].f, 0.f, 1.f);
+        float S = sparm; // * sparm;
+        float normD = std::max(0.05f, 1 - S);
+        coef_D /= normD;
+
+        float v_attack = corr_discharge ? 0 : v_gate;
+
+        float v_decay = corr_discharge ? S : v_cc;
+        float v_release = v_gate;
+
+        float diff_v_a = std::max(0.f, v_attack - corr_v_c1);
+        float diff_v_d =
+            (corr_discharge && gate) ? v_decay - corr_v_c1 : std::min(0.f, v_decay - corr_v_c1);
+        // float diff_v_d = std::min( 0.f, v_decay   - v_c1 );
+        float diff_v_r = std::min(0.f, v_release - corr_v_c1);
+
+        corr_v_c1 = corr_v_c1 + diff_v_a * coef_A;
+        corr_v_c1 = corr_v_c1 + diff_v_d * coef_D;
+        corr_v_c1 = corr_v_c1 + diff_v_r * coef_R;
+
+        // adsr->process_block();
+        output = corr_v_c1;
+        if (!gate && !corr_discharge && corr_v_c1 < 1e-6)
+            output = 0;
+    }
     int getEnvState() { return envstate; }
 
   private:
@@ -370,4 +455,10 @@ class ADSRModulationSource : public ModulationSource
     float _v_c1 = 0.f;
     float _v_c1_delayed = 0.f;
     float _discharge = 0.f;
+
+    float corr_v_c1{0.f};
+    float corr_v_c1_delayed{0.f};
+    bool corr_discharge{false};
 };
+
+#endif // SURGE_SRC_COMMON_DSP_MODULATORS_ADSRMODULATIONSOURCE_H

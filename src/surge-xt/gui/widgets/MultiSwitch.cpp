@@ -1,17 +1,24 @@
 /*
-** Surge Synthesizer is Free and Open Source Software
-**
-** Surge is made available under the Gnu General Public License, v3.0
-** https://www.gnu.org/licenses/gpl-3.0.en.html
-**
-** Copyright 2004-2021 by various individuals as described by the Git transaction log
-**
-** All source at: https://github.com/surge-synthesizer/surge.git
-**
-** Surge was a commercial product from 2004-2018, with Copyright and ownership
-** in that period held by Claes Johanson at Vember Audio. Claes made Surge
-** open source in September 2018.
-*/
+ * Surge XT - a free and open source hybrid synthesizer,
+ * built by Surge Synth Team
+ *
+ * Learn more at https://surge-synthesizer.github.io/
+ *
+ * Copyright 2018-2023, various authors, as described in the GitHub
+ * transaction log.
+ *
+ * Surge XT is released under the GNU General Public Licence v3
+ * or later (GPL-3.0-or-later). The license is found in the "LICENSE"
+ * file in the root of this repository, or at
+ * https://www.gnu.org/licenses/gpl-3.0.en.html
+ *
+ * Surge was a commercial product from 2004-2018, copyright and ownership
+ * held by Claes Johanson at Vember Audio during that period.
+ * Claes made Surge open source in September 2018.
+ *
+ * All source for Surge XT is available at
+ * https://github.com/surge-synthesizer/surge
+ */
 
 #include "MultiSwitch.h"
 #include "SurgeImage.h"
@@ -40,7 +47,7 @@ void MultiSwitch::paint(juce::Graphics &g)
     auto y = -valueToOff(value) * heightOfOneImage;
     auto t = juce::AffineTransform().translated(0, y);
 
-    float activationOpacity = isDeactivated ? 0.5 : 1.0;
+    float activationOpacity = isDeactivated ? 0.25 : 1.0;
 
     g.reduceClipRegion(getLocalBounds());
 
@@ -120,6 +127,11 @@ juce::Point<float> MultiSwitch::valueToCoordinate(float val) const
 
 void MultiSwitch::mouseDown(const juce::MouseEvent &event)
 {
+    if (middleClickable && event.mods.isMiddleButtonDown())
+    {
+        notifyControlModifierClicked(event.mods);
+    }
+
     if (forwardedMainFrameMouseDowns(event))
     {
         return;
@@ -142,7 +154,10 @@ void MultiSwitch::mouseDown(const juce::MouseEvent &event)
 
     if (draggable)
     {
-        juce::Timer::callAfterDelay(250, [this]() { this->setCursorToArrow(); });
+        juce::Timer::callAfterDelay(250, [that = juce::Component::SafePointer(this)]() {
+            if (that)
+                that->setCursorToArrow();
+        });
     }
 
     mouseDownLongHold(event);
@@ -269,14 +284,17 @@ void MultiSwitch::endHover()
 void MultiSwitch::mouseWheelMove(const juce::MouseEvent &event,
                                  const juce::MouseWheelDetails &wheel)
 {
-    if (!draggable)
+    // If we aren't draggable and a drag is happening, ignore the mouse wheel gesture
+    // This (vs just a plain !draggable) reverts the 1.9 behaviour of mouse wheel through
+    // the presets.
+    if (!draggable && (event.mouseWasDraggedSinceMouseDown() || event.getLengthOfMousePress() > 0))
     {
         return;
     }
 
     int dir = wheelHelper.accumulate(wheel);
 
-    // Veritcally aligned switches have higher values at the bottom
+    // Vertically aligned switches have higher values at the bottom
     if (rows > 1)
     {
         dir = -dir;
@@ -324,6 +342,8 @@ bool MultiSwitch::keyPressed(const juce::KeyPress &key)
     }
     else
     {
+        _DBGCOUT << "Setting integer value to " << iv << " " << 1.f * iv / (rows * columns - 1)
+                 << std::endl;
         setValue(1.f * iv / (rows * columns - 1));
     }
     notifyBeginEdit();
@@ -529,6 +549,8 @@ void MultiSwitchSelfDraw::paint(juce::Graphics &g)
 
     auto uph = skin->getColor(clr::UnpressedHighlight);
     bool royalMode = false;
+    const bool isEn = isEnabled() && !isDeactivated;
+    const float alpha = isEn ? 1.f : 0.35f;
 
     if (uph.getAlpha() > 0)
     {
@@ -540,18 +562,18 @@ void MultiSwitchSelfDraw::paint(juce::Graphics &g)
 
     if (royalMode)
     {
-        g.setColour(skin->getColor(clr::UnpressedHighlight));
+        g.setColour(skin->getColor(clr::UnpressedHighlight).withMultipliedAlpha(alpha));
         g.fillRoundedRectangle(b.toFloat(), corner);
-        g.setColour(skin->getColor(clr::Background));
+        g.setColour(skin->getColor(clr::Background).withMultipliedAlpha(alpha));
         g.fillRoundedRectangle(b.toFloat().reduced(0, 1), corner);
     }
     else
     {
-        g.setColour(skin->getColor(clr::Background));
+        g.setColour(skin->getColor(clr::Background).withMultipliedAlpha(alpha));
         g.fillRoundedRectangle(b.toFloat(), corner);
     }
 
-    g.setColour(skin->getColor(clr::Border));
+    g.setColour(skin->getColor(clr::Border).withMultipliedAlpha(alpha));
     g.drawRoundedRectangle(b.toFloat(), corner, 1);
 
     auto cw = 1.f * (getWidth() - 2) / columns;
@@ -576,9 +598,8 @@ void MultiSwitchSelfDraw::paint(juce::Graphics &g)
 
             auto isOn = isCellOn(r, c);
             auto isHo = isHovered && hoverSelection == idx;
-            auto isEn = isEnabled() && !isDeactivated;
 
-            auto fg = skin->getColor(clr::Text);
+            auto fg = isEn ? skin->getColor(clr::Text) : skin->getColor(clr::DeactivatedText);
 
             if (!isEn)
             {

@@ -1,19 +1,39 @@
 /*
-  ==============================================================================
-
-    This file was auto-generated!
-
-    It contains the basic framework code for a JUCE plugin processor.
-
-  ==============================================================================
-*/
+ * Surge XT - a free and open source hybrid synthesizer,
+ * built by Surge Synth Team
+ *
+ * Learn more at https://surge-synthesizer.github.io/
+ *
+ * Copyright 2018-2023, various authors, as described in the GitHub
+ * transaction log.
+ *
+ * Surge XT is released under the GNU General Public Licence v3
+ * or later (GPL-3.0-or-later). The license is found in the "LICENSE"
+ * file in the root of this repository, or at
+ * https://www.gnu.org/licenses/gpl-3.0.en.html
+ *
+ * Surge was a commercial product from 2004-2018, copyright and ownership
+ * held by Claes Johanson at Vember Audio during that period.
+ * Claes made Surge open source in September 2018.
+ *
+ * All source for Surge XT is available at
+ * https://github.com/surge-synthesizer/surge
+ */
 
 #include "SurgeSynthEditor.h"
 #include "SurgeSynthProcessor.h"
 #include "DebugHelpers.h"
-#include "plugin_type_extensions/SurgeSynthFlavorExtensions.h"
 #include "version.h"
 #include "sst/plugininfra/cpufeatures.h"
+#include "globals.h"
+#include "UserDefaults.h"
+#include "fmt/core.h"
+
+#if LINUX
+// getCurrentPosition is deprecated in J7
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
 
 /*
  * This is a bit odd but - this is an editor concept with the lifetime of the processor
@@ -38,7 +58,7 @@ SurgeSynthProcessor::SurgeSynthProcessor()
 
 #if BUILD_IS_DEBUG
     std::ostringstream oss;
-    oss << "SurgeXT " << wrapperTypeString << "\n"
+    oss << "Surge XT " << wrapperTypeString << "\n"
         << "  - Version      : " << Surge::Build::FullVersionStr << " with JUCE " << std::hex
         << JUCE_VERSION << std::dec << "\n"
         << "  - Build Info   : " << Surge::Build::BuildDate << " " << Surge::Build::BuildTime
@@ -108,15 +128,60 @@ SurgeSynthProcessor::SurgeSynthProcessor()
         }
     }
 
+    memset(inputLatentBuffer, 0, sizeof(inputLatentBuffer));
+
     surge->hostProgram = juce::PluginHostType().getHostDescription();
     surge->juceWrapperType = wrapperTypeString;
 
     midiKeyboardState.addListener(this);
 
-    SurgeSynthProcessorSpecificExtensions(this, surge.get());
+#if SURGE_HAS_OSC
+    // OSC (Open Sound Control)
+    bool startOSCInNow =
+        Surge::Storage::getUserDefaultValue(&(surge->storage), Surge::Storage::StartOSCIn, false);
+    if (startOSCInNow)
+    {
+        int defaultOSCInPort = Surge::Storage::getUserDefaultValue(
+            &(surge->storage), Surge::Storage::OSCPortIn, DEFAULT_OSC_PORT_IN);
+        bool success = initOSCIn(defaultOSCInPort);
+        if (!success)
+        {
+            std::ostringstream msg;
+            msg << "Surge XT was unable to connect to UDP port " << defaultOSCInPort
+                << " for OSC input.\n"
+                << "It may be in use by another application.";
+            surge->storage.reportError(msg.str(), "OSC Input Initialization Error");
+        }
+    }
+    bool startOSCOutNow =
+        Surge::Storage::getUserDefaultValue(&(surge->storage), Surge::Storage::StartOSCOut, false);
+    if (startOSCOutNow)
+    {
+        int defaultOSCOutPort = Surge::Storage::getUserDefaultValue(
+            &(surge->storage), Surge::Storage::OSCPortOut, DEFAULT_OSC_PORT_OUT);
+        bool success = initOSCOut(defaultOSCOutPort);
+        if (!success)
+        {
+            std::ostringstream msg;
+            msg << "Surge XT was unable to connect to UDP port " << defaultOSCOutPort
+                << " for OSC output.\n"
+                << "It may be in use by another application.";
+            surge->storage.reportError(msg.str(), "OSC Output Initialization Error");
+            return;
+        }
+    }
+
+#endif
 }
 
-SurgeSynthProcessor::~SurgeSynthProcessor() {}
+SurgeSynthProcessor::~SurgeSynthProcessor()
+{
+    if (oscListener.listening)
+    {
+        oscListener.stopListening();
+    }
+    stopOSCOut(); // This also deletes the patch change -> OSC out listener
+}
 
 //==============================================================================
 const juce::String SurgeSynthProcessor::getName() const { return JucePlugin_Name; }
@@ -180,7 +245,61 @@ const juce::String SurgeSynthProcessor::getProgramName(int index)
 
 void SurgeSynthProcessor::changeProgramName(int index, const juce::String &newName) {}
 
+/* OSC (Open Sound Control) */
+bool SurgeSynthProcessor::initOSCIn(int port)
+{
+    auto state = oscListener.init(this, surge, port);
+    surge->storage.oscListenerRunning = state;
+
+    return state;
+}
+
+bool SurgeSynthProcessor::changeOSCInPort(int new_port)
+{
+    if (oscListener.listening)
+    {
+        surge->storage.oscListenerRunning = false;
+        oscListener.disconnect();
+    }
+
+    return initOSCIn(new_port);
+}
+
+bool SurgeSynthProcessor::initOSCOut(int port)
+{
+    auto state = oscSender.init(surge, port);
+    surge->storage.oscSending = state;
+    if (state)
+    {
+        // Add listener for patch changes, to send new path to OSC output
+        // This will run on the juce::MessageManager thread so as to
+        // not tie up the patch loading thread.
+        surge->addPatchLoadedListener("OSC_OUT",
+                                      [ssp = this](auto s) { ssp->patch_load_to_OSC(s); });
+    }
+
+    return state;
+}
+
+void SurgeSynthProcessor::stopOSCOut()
+{
+    surge->deletePatchLoadedListener("OSC_OUT");
+    oscSender.stopSending();
+}
+
+bool SurgeSynthProcessor::changeOSCOutPort(int new_port) { return initOSCOut(new_port); }
+
+// Called as 'patch loaded' listener; runs on the juce::MessageManager thread
+void SurgeSynthProcessor::patch_load_to_OSC(fs::path fullPath)
+{
+    std::string pathStr = path_to_string(fullPath);
+    if (surge->storage.oscSending && !pathStr.empty())
+    {
+        oscSender.send("/patch", pathStr);
+    }
+}
 //==============================================================================
+
 void SurgeSynthProcessor::prepareToPlay(double sr, int samplesPerBlock)
 {
     surge->setSamplerate(sr);
@@ -200,17 +319,14 @@ bool SurgeSynthProcessor::isBusesLayoutSupported(const BusesLayout &layouts) con
     auto mocs = layouts.getMainOutputChannelSet();
     auto mics = layouts.getMainInputChannelSet();
 
-    auto outputValid = (mocs == juce::AudioChannelSet::stereo()) ||
-                       (mocs == juce::AudioChannelSet::mono()) || (mocs.isDisabled());
+    auto outputValid = (mocs == juce::AudioChannelSet::stereo()) || (mocs.isDisabled());
     auto inputValid = (mics == juce::AudioChannelSet::stereo()) ||
                       (mics == juce::AudioChannelSet::mono()) || (mics.isDisabled());
 
-    /*
-     * Check the 6 output shape
-     */
+    // Check the 6 output shape
     auto c1 = layouts.getNumChannels(false, 1);
     auto c2 = layouts.getNumChannels(false, 2);
-    auto sceneOut = (c1 == 0 && c2 == 0) || (c1 == 2 && c2 == 2);
+    auto sceneOut = (c1 == 0 || c1 == 2) && (c2 == 0 || c2 == 2);
 
     return outputValid && inputValid && sceneOut;
 }
@@ -224,9 +340,34 @@ void SurgeSynthProcessor::processBlock(juce::AudioBuffer<float> &buffer,
 
     // Make sure we have a main output
     auto mb = getBus(false, 0);
+
     if (mb->getNumberOfChannels() != 2 || !mb->isEnabled())
     {
         // We have to have a stereo output
+        if (!warnedAboutBadConfig)
+        {
+            std::ostringstream msg;
+            msg << "Surge XT was not configured to have stereo output, which is required.\n"
+                << "The main output bus has " << mb->getNumberOfChannels() << " channels\n"
+                << "and is " << (mb->isEnabled() ? "enabled" : "disabled") << ".";
+            surge->storage.reportError(msg.str(), "Bus Configuration Error");
+            warnedAboutBadConfig = true;
+        }
+        return;
+    }
+
+    if (buffer.getNumChannels() < 2 && mb->isEnabled())
+    {
+        if (!warnedAboutBadConfig)
+        {
+            std::ostringstream msg;
+            msg << "Surge XT did not receive a stereo processing buffer, which is required.\n"
+                << "The provided buffer has " << buffer.getNumChannels() << " channels.\n"
+                << "This can happen with certain Bluetooth headsets on macOS,\n"
+                << "when they are used as both an input and an output.";
+            surge->storage.reportError(msg.str(), "Bus Configuration Error");
+            warnedAboutBadConfig = true;
+        }
         return;
     }
 
@@ -237,10 +378,12 @@ void SurgeSynthProcessor::processBlock(juce::AudioBuffer<float> &buffer,
             surge->allNotesOff();
             bypassCountdown = 8; // let us fade out by doing a halted process
         }
+
         if (bypassCountdown == 0)
         {
             return;
         }
+
         bypassCountdown--;
         surge->audio_processing_active = false;
         priorCallWasProcessBlockNotBypassed = false;
@@ -253,22 +396,48 @@ void SurgeSynthProcessor::processBlock(juce::AudioBuffer<float> &buffer,
         // deactivated so
         surge->allNotesOff();
     }
+
     surge->audio_processing_active = true;
 
     processBlockPlayhead();
     processBlockMidiFromGUI();
-
+    processBlockOSC();
     auto mainOutput = getBusBuffer(buffer, false, 0);
-
     auto mainInput = getBusBuffer(buffer, true, 0);
     auto sceneAOutput = getBusBuffer(buffer, false, 1);
     auto sceneBOutput = getBusBuffer(buffer, false, 2);
 
     auto midiIt = midiMessages.findNextSamplePosition(0);
     int nextMidi = -1;
+
     if (midiIt != midiMessages.cend())
     {
         nextMidi = (*midiIt).samplePosition;
+    }
+
+    const float *incL{nullptr}, *incR{nullptr};
+    if (mainInput.getNumChannels() > 0)
+    {
+        incL = mainInput.getReadPointer(0);
+        incR = incL;
+    }
+    if (mainInput.getNumChannels() > 1)
+    {
+        incR = mainInput.getReadPointer(1);
+    }
+
+    auto sc = buffer.getNumSamples();
+    if (!inputIsLatent && (sc & ~(BLOCK_SIZE - 1)) != sc)
+    {
+        surge->storage.reportError(
+            fmt::format("Incoming audio input block is not a multiple of {sz} samples.\n"
+                        "If audio input is used, it will be delayed by {sz} samples, in order to "
+                        "compensate.\n"
+                        "This can be avoided by setting the DAW to use fixed buffer sizes, if "
+                        "possible.",
+                        fmt::arg("sz", BLOCK_SIZE)),
+            "Audio Input Latency Activated", SurgeStorage::AUDIO_INPUT_LATENCY_WARNING, false);
+        inputIsLatent = true;
     }
 
     for (int i = 0; i < buffer.getNumSamples(); i++)
@@ -277,6 +446,7 @@ void SurgeSynthProcessor::processBlock(juce::AudioBuffer<float> &buffer,
         {
             applyMidi(*midiIt);
             midiIt++;
+
             if (midiIt == midiMessages.cend())
             {
                 nextMidi = -1;
@@ -286,51 +456,73 @@ void SurgeSynthProcessor::processBlock(juce::AudioBuffer<float> &buffer,
                 nextMidi = (*midiIt).samplePosition;
             }
         }
+
         auto outL = mainOutput.getWritePointer(0, i);
         auto outR = mainOutput.getWritePointer(1, i);
 
-        if (blockPos == 0 && mainInput.getNumChannels() > 0)
+        if (blockPos == 0 && incL && incR)
         {
-            auto inL = mainInput.getReadPointer(0, i);
-            auto inR = inL;                     // assume mono
-            if (mainInput.getNumChannels() > 1) // unless its not
-            {
-                inR = mainInput.getReadPointer(1, i);
-            }
             surge->process_input = true;
-            memcpy(&(surge->input[0][0]), inL, BLOCK_SIZE * sizeof(float));
-            memcpy(&(surge->input[1][0]), inR, BLOCK_SIZE * sizeof(float));
+
+            if (inputIsLatent)
+            {
+                memcpy(&(surge->input[0][0]), inputLatentBuffer[0], BLOCK_SIZE * sizeof(float));
+                memcpy(&(surge->input[1][0]), inputLatentBuffer[1], BLOCK_SIZE * sizeof(float));
+            }
+            else
+            {
+                auto inL = incL + i;
+                auto inR = incR + i;
+
+                memcpy(&(surge->input[0][0]), inL, BLOCK_SIZE * sizeof(float));
+                memcpy(&(surge->input[1][0]), inR, BLOCK_SIZE * sizeof(float));
+            }
         }
         else
         {
             surge->process_input = false;
         }
+
         if (blockPos == 0)
         {
             surge->process();
             surge->time_data.ppqPos +=
                 (double)BLOCK_SIZE * surge->time_data.tempo / (60. * surge->storage.samplerate);
         }
+
+        if (inputIsLatent && incL && incR)
+        {
+            inputLatentBuffer[0][blockPos] = incL[i];
+            inputLatentBuffer[1][blockPos] = incR[i];
+        }
+
         *outL = surge->output[0][blockPos];
         *outR = surge->output[1][blockPos];
 
-        if (surge->activateExtraOutputs && sceneAOutput.getNumChannels() == 2 &&
-            sceneBOutput.getNumChannels() == 2)
+        if (surge->activateExtraOutputs)
         {
-            auto sAL = sceneAOutput.getWritePointer(0, i);
-            auto sAR = sceneAOutput.getWritePointer(1, i);
-            auto sBL = sceneBOutput.getWritePointer(0, i);
-            auto sBR = sceneBOutput.getWritePointer(1, i);
+            if (sceneAOutput.getNumChannels() == 2)
+            {
+                auto sAL = sceneAOutput.getWritePointer(0, i);
+                auto sAR = sceneAOutput.getWritePointer(1, i);
 
-            if (sAL && sAR)
-            {
-                *sAL = surge->sceneout[0][0][blockPos];
-                *sAR = surge->sceneout[0][1][blockPos];
+                if (sAL && sAR)
+                {
+                    *sAL = surge->sceneout[0][0][blockPos];
+                    *sAR = surge->sceneout[0][1][blockPos];
+                }
             }
-            if (sBL && sBR)
+
+            if (sceneBOutput.getNumChannels() == 2)
             {
-                *sBL = surge->sceneout[1][0][blockPos];
-                *sBR = surge->sceneout[1][1][blockPos];
+                auto sBL = sceneBOutput.getWritePointer(0, i);
+                auto sBR = sceneBOutput.getWritePointer(1, i);
+
+                if (sBL && sBR)
+                {
+                    *sBL = surge->sceneout[1][0][blockPos];
+                    *sBR = surge->sceneout[1][1][blockPos];
+                }
             }
         }
 
@@ -350,7 +542,8 @@ void SurgeSynthProcessor::processBlock(juce::AudioBuffer<float> &buffer,
 void SurgeSynthProcessor::processBlockPlayhead()
 {
     auto playhead = getPlayHead();
-    if (playhead)
+
+    if (playhead && !(wrapperType == wrapperType_Standalone))
     {
         juce::AudioPlayHead::CurrentPositionInfo cp;
         playhead->getCurrentPosition(cp);
@@ -358,7 +551,9 @@ void SurgeSynthProcessor::processBlockPlayhead()
 
         // isRecording should always imply isPlaying but better safe than sorry
         if (cp.isPlaying || cp.isRecording)
+        {
             surge->time_data.ppqPos = cp.ppqPosition;
+        }
 
         surge->time_data.timeSigNumerator = cp.timeSigNumerator;
         surge->time_data.timeSigDenominator = cp.timeSigDenominator;
@@ -376,6 +571,7 @@ void SurgeSynthProcessor::processBlockPlayhead()
 void SurgeSynthProcessor::processBlockMidiFromGUI()
 {
     midiR rec;
+
     while (midiFromGUI.pop(rec))
     {
         if (rec.type == midiR::NOTE)
@@ -400,6 +596,22 @@ void SurgeSynthProcessor::processBlockMidiFromGUI()
     }
 }
 
+void SurgeSynthProcessor::processBlockOSC()
+{
+    auto messages = oscRingBuf.popall();
+    for (const auto &om : messages)
+    {
+        float pval = om.val;
+        if (om.type == oscParamMsg::PARAMETER) // currently the only type
+        {
+            if (om.param->valtype == vt_int)
+                pval = Parameter::intScaledToFloat(pval, om.param->val_max.i, om.param->val_min.i);
+            surge->setParameter01(surge->idForParameter(om.param), pval, true);
+            surge->storage.getPatch().isDirty = true;
+        }
+    }
+}
+
 void SurgeSynthProcessor::processBlockPostFunction()
 {
     if (checkNamesEvery++ > 10)
@@ -409,6 +621,13 @@ void SurgeSynthProcessor::processBlockPostFunction()
         {
             updateHostDisplay(
                 juce::AudioProcessorListener::ChangeDetails().withParameterInfoChanged(true));
+        }
+        if (std::atomic_exchange(&surge->patchChanged, false))
+        {
+            updateHostDisplay(juce::AudioProcessorListener::ChangeDetails()
+                                  .withParameterInfoChanged(true)
+                                  .withProgramChanged(true)
+                                  .withNonParameterStateChanged(true));
         }
     }
 }
@@ -569,6 +788,32 @@ clap_process_status SurgeSynthProcessor::clap_direct_process(const clap_process 
     return CLAP_PROCESS_CONTINUE;
 }
 
+void SurgeSynthProcessor::clap_direct_paramsFlush(const clap_input_events *in,
+                                                  const clap_output_events *out) noexcept
+{
+    uint32_t sz = in->size(in);
+    for (uint32_t i = 0; i < sz; ++i)
+    {
+        auto ev = in->get(in, i);
+        process_clap_event(ev);
+        if (ev->type == CLAP_EVENT_PARAM_VALUE)
+        {
+            auto pevt = reinterpret_cast<const clap_event_param_value *>(ev);
+            auto jp = static_cast<JUCEParameterVariant *>(pevt->cookie);
+            if (!jp) // unlikely
+                jp = findParameterByParameterId(pevt->param_id);
+            jp->processorParam->setValue(pevt->value);
+        }
+    }
+    if (!is_clap_processing)
+    {
+        // Setting params can change internal state so give the synth a chance to react
+        // although the spec is unclear whether this can be called when processing, so don't
+        // call surge process if we are!
+        surge->process();
+    }
+}
+
 void SurgeSynthProcessor::process_clap_event(const clap_event_header_t *evt)
 {
     if (evt->space_id != CLAP_CORE_EVENT_SPACE_ID)
@@ -579,41 +824,80 @@ void SurgeSynthProcessor::process_clap_event(const clap_event_header_t *evt)
     case CLAP_EVENT_NOTE_ON:
     {
         auto nevt = reinterpret_cast<const clap_event_note *>(evt);
-        surge->playNote(nevt->channel, nevt->key, 127 * nevt->velocity, 0, nevt->note_id);
+
+        if (nevt->velocity != 0)
+            surge->playNote(nevt->channel, nevt->key, 127 * nevt->velocity, 0, nevt->note_id);
+        else
+            surge->releaseNote(nevt->channel, nevt->key, 127 * nevt->velocity, nevt->note_id);
+
+        {
+            // We need to remember to update the virtual keyboard
+            auto m = juce::MidiMessage::noteOn(nevt->channel + 1, nevt->key, (float)nevt->velocity);
+            juce::ScopedValueSetter<bool> midiAdd(isAddingFromMidi, true);
+            midiKeyboardState.processNextMidiEvent(m);
+        }
+    }
+    break;
+    case CLAP_EVENT_NOTE_CHOKE:
+    {
+        auto nevt = reinterpret_cast<const clap_event_note *>(evt);
+        surge->chokeNote(nevt->channel, nevt->key, 127 * nevt->velocity, nevt->note_id);
+
+        {
+            // We need to remember to update the virtual keyboard
+            auto m = juce::MidiMessage::noteOff(nevt->channel + 1, nevt->key);
+            juce::ScopedValueSetter<bool> midiAdd(isAddingFromMidi, true);
+            midiKeyboardState.processNextMidiEvent(m);
+        }
     }
     break;
     case CLAP_EVENT_NOTE_OFF:
     {
         auto nevt = reinterpret_cast<const clap_event_note *>(evt);
         surge->releaseNote(nevt->channel, nevt->key, 127 * nevt->velocity, nevt->note_id);
+
+        {
+            // We need to remember to update the virtual keyboard
+            auto m = juce::MidiMessage::noteOff(nevt->channel + 1, nevt->key);
+            juce::ScopedValueSetter<bool> midiAdd(isAddingFromMidi, true);
+            midiKeyboardState.processNextMidiEvent(m);
+        }
     }
     break;
     case CLAP_EVENT_MIDI:
     {
         auto mevt = reinterpret_cast<const clap_event_midi *>(evt);
-        applyMidi(juce::MidiMessageMetadata(mevt->data, 3, mevt->header.time));
+        auto sz = juce::MidiMessage::getMessageLengthFromFirstByte(mevt->data[0]);
+        jassert(sz <= 3 && sz > 0);
+        applyMidi(juce::MidiMessageMetadata(mevt->data, sz, mevt->header.time));
     }
     break;
     case CLAP_EVENT_PARAM_VALUE:
     {
         auto pevt = reinterpret_cast<const clap_event_param_value *>(evt);
-        auto jp = static_cast<juce::AudioProcessorParameter *>(pevt->cookie);
-        jp->setValue(pevt->value);
+        auto jp = static_cast<JUCEParameterVariant *>(pevt->cookie);
+        if (!jp) // unlikely
+            jp = findParameterByParameterId(pevt->param_id);
+        jp->processorParam->setValue(pevt->value);
     }
     break;
     case CLAP_EVENT_PARAM_MOD:
     {
         auto pevt = reinterpret_cast<const clap_event_param_mod *>(evt);
-        auto jp = static_cast<SurgeBaseParam *>(pevt->cookie);
-        if (pevt->note_id >= 0)
-        {
-            jassert(jp->supportsPolyphonicModulation());
-            jp->applyPolyphonicModulation(pevt->note_id, pevt->key, pevt->channel, pevt->amount);
-        }
-        else
+        auto jv = static_cast<JUCEParameterVariant *>(pevt->cookie);
+        if (!jv) // unlikely
+            jv = findParameterByParameterId(pevt->param_id);
+        auto jp = static_cast<SurgeBaseParam *>(jv->processorParam);
+        if ((pevt->note_id == -1 && pevt->channel == -1 && pevt->key == -1) ||
+            !jp->supportsPolyphonicModulation())
         {
             jassert(jp->supportsMonophonicModulation());
             jp->applyMonophonicModulation(pevt->amount);
+        }
+        else
+        {
+            jassert(jp->supportsPolyphonicModulation());
+            jp->applyPolyphonicModulation(pevt->note_id, pevt->key, pevt->channel, pevt->amount);
         }
     }
     break;
@@ -621,7 +905,6 @@ void SurgeSynthProcessor::process_clap_event(const clap_event_header_t *evt)
     case CLAP_EVENT_NOTE_EXPRESSION:
     {
         auto pevt = reinterpret_cast<const clap_event_note_expression *>(evt);
-        jassert(pevt->note_id == -1); // note expressions come to channel/key
         SurgeVoice::NoteExpressionType net = SurgeVoice::UNKNOWN;
         switch (pevt->expression_id)
         {
@@ -658,7 +941,7 @@ void SurgeSynthProcessor::process_clap_event(const clap_event_header_t *evt)
     case CLAP_EVENT_NOTE_END:
     default:
     {
-        DBG("Unknown message type " << (int)(evt->type));
+        DBG("Unknown CLAP Message type in Surge XT Direct " << (int)(evt->type));
         // In theory I should never get this.
         // jassertfalse
     }
@@ -677,7 +960,10 @@ void SurgeSynthProcessor::applyMidi(const juce::MidiMessageMetadata &it)
     if (m.isNoteOn())
     {
         // no note ids coming from juce- or ui- land
-        surge->playNote(ch, m.getNoteNumber(), m.getVelocity(), 0, -1);
+        if (m.getVelocity() != 0)
+            surge->playNote(ch, m.getNoteNumber(), m.getVelocity(), 0, -1);
+        else
+            surge->releaseNote(ch, m.getNoteNumber(), m.getVelocity(), -1);
     }
     else if (m.isNoteOff())
     {
@@ -815,6 +1101,95 @@ juce::AudioProcessorParameter *SurgeSynthProcessor::getBypassParameter() const
     return bypassParameter;
 }
 
+void SurgeSynthProcessor::reset() { blockPos = 0; }
+
+#if HAS_CLAP_JUCE_EXTENSIONS
+
+uint32_t SurgeSynthProcessor::remoteControlsPageCount() noexcept
+{
+    return 5; // macros + scene a and b mixer and filters
+}
+
+bool SurgeSynthProcessor::remoteControlsPageFill(
+    uint32_t pageIndex, juce::String &sectionName, uint32_t &pageID, juce::String &pageName,
+    std::array<juce::AudioProcessorParameter *, CLAP_REMOTE_CONTROLS_COUNT> &params) noexcept
+{
+    if (pageIndex < 0 || pageIndex >= remoteControlsPageCount())
+        return false;
+
+    pageID = pageIndex + 2054;
+    for (auto &p : params)
+        p = nullptr;
+    switch (pageIndex)
+    {
+    case 0:
+    {
+        sectionName = "Global";
+        pageName = "Macros";
+        for (int i = 0; i < CLAP_REMOTE_CONTROLS_COUNT && i < macrosById.size(); ++i)
+            params[i] = macrosById[i];
+    }
+    break;
+    case 1:
+    case 3:
+    {
+        int scene = 0;
+        sectionName = "Scene A";
+        pageName = "Scene A Mixer";
+        if (pageIndex == 3)
+        {
+            sectionName = "Scene B";
+            pageName = "Scene B Mixer";
+            scene = 1;
+        }
+        auto &sc = surge->storage.getPatch().scene[scene];
+        params[0] = paramsByID[surge->idForParameter(&sc.level_o1)];
+        params[1] = paramsByID[surge->idForParameter(&sc.level_o2)];
+        params[2] = paramsByID[surge->idForParameter(&sc.level_o3)];
+        params[3] = nullptr;
+        params[4] = paramsByID[surge->idForParameter(&sc.level_noise)];
+        params[5] = paramsByID[surge->idForParameter(&sc.level_ring_12)];
+        params[6] = paramsByID[surge->idForParameter(&sc.level_ring_23)];
+        params[7] = paramsByID[surge->idForParameter(&sc.level_pfg)];
+    }
+    break;
+    case 2:
+    case 4:
+    {
+        int scene = 0;
+        sectionName = "Scene A";
+        pageName = "Scene A Filters";
+        if (pageIndex == 4)
+        {
+            scene = 1;
+            sectionName = "Scene B";
+            pageName = "Scene B Filters";
+        }
+        auto &sc = surge->storage.getPatch().scene[scene];
+        params[0] = paramsByID[surge->idForParameter(&sc.filterunit[0].cutoff)];
+        params[1] = paramsByID[surge->idForParameter(&sc.filterunit[0].resonance)];
+        params[2] = paramsByID[surge->idForParameter(&sc.filterunit[1].cutoff)];
+        params[3] = paramsByID[surge->idForParameter(&sc.filterunit[1].resonance)];
+        params[4] = paramsByID[surge->idForParameter(&sc.wsunit.drive)];
+        params[5] = nullptr;
+        params[6] = paramsByID[surge->idForParameter(&sc.filter_balance)];
+        params[7] = paramsByID[surge->idForParameter(&sc.feedback)];
+    }
+    break;
+    }
+    return true;
+}
+#endif
+
 //==============================================================================
 // This creates new instances of the plugin..
 juce::AudioProcessor *JUCE_CALLTYPE createPluginFilter() { return new SurgeSynthProcessor(); }
+
+#if 0
+void *JUCE_CALLTYPE clapJuceExtensionCustomFactory(const char *)
+{
+    // ToDo: Implement preset discovery here
+    // See #6930
+    return nullptr;
+}
+#endif

@@ -1,24 +1,31 @@
 /*
- ** Surge Synthesizer is Free and Open Source Software
- **
- ** Surge is made available under the Gnu General Public License, v3.0
- ** https://www.gnu.org/licenses/gpl-3.0.en.html
- **
- ** Copyright 2004-2021 by various individuals as described by the Git transaction log
- **
- ** All source at: https://github.com/surge-synthesizer/surge.git
- **
- ** Surge was a commercial product from 2004-2018, with Copyright and ownership
- ** in that period held by Claes Johanson at Vember Audio. Claes made Surge
- ** open source in September 2018.
+ * Surge XT - a free and open source hybrid synthesizer,
+ * built by Surge Synth Team
+ *
+ * Learn more at https://surge-synthesizer.github.io/
+ *
+ * Copyright 2018-2023, various authors, as described in the GitHub
+ * transaction log.
+ *
+ * Surge XT is released under the GNU General Public Licence v3
+ * or later (GPL-3.0-or-later). The license is found in the "LICENSE"
+ * file in the root of this repository, or at
+ * https://www.gnu.org/licenses/gpl-3.0.en.html
+ *
+ * Surge was a commercial product from 2004-2018, copyright and ownership
+ * held by Claes Johanson at Vember Audio during that period.
+ * Claes made Surge open source in September 2018.
+ *
+ * All source for Surge XT is available at
+ * https://github.com/surge-synthesizer/surge
  */
 
-#include <iostream>
 #include "SurgeGUIEditor.h"
 #include "SurgeGUIEditorTags.h"
 
 #include "widgets/ParameterInfowindow.h"
 #include "widgets/MainFrame.h"
+#include "fmt/core.h"
 #include "DebugHelpers.h"
 
 void SurgeGUIEditor::showInfowindow(int ptag, juce::Rectangle<int> relativeTo,
@@ -78,6 +85,20 @@ void SurgeGUIEditor::idleInfowindow()
     paramInfowindow->idle();
 }
 
+std::string SurgeGUIEditor::getAccessibleModulationVoiceover(long ptag)
+{
+    auto pid = ptag - start_paramtags;
+    auto p = synth->storage.getPatch().param_ptr[pid];
+
+    ModulationDisplayInfoWindowStrings mss;
+    char pdisp[TXT_SIZE];
+    p->get_display_of_modulation_depth(
+        pdisp, synth->getModDepth(pid, modsource, current_scene, modsource_index),
+        synth->isBipolarModulation(modsource), Parameter::InfoWindow, &mss);
+
+    return mss.val + " mod " + mss.dvalplus;
+}
+
 void SurgeGUIEditor::updateInfowindowContents(int ptag, bool isModulated)
 {
     auto pid = ptag - start_paramtags;
@@ -89,17 +110,22 @@ void SurgeGUIEditor::updateInfowindowContents(int ptag, bool isModulated)
 
     if (isModulated)
     {
-        char pname[1024], pdisp[TXT_SIZE], txt[TXT_SIZE];
         SurgeSynthesizer::ID ptagid;
-        if (synth->fromSynthSideId(pid, ptagid))
-            synth->getParameterName(ptagid, txt);
+        char pdisp[TXT_SIZE], txt[TXT_SIZE];
         auto mn = modulatorNameWithIndex(current_scene, modsource, modsource_index, true, false);
 
-        sprintf(pname, "%s -> %s", mn.c_str(), txt);
+        if (synth->fromSynthSideId(pid, ptagid))
+        {
+            synth->getParameterName(ptagid, txt);
+        }
+
+        std::string pname = fmt::format("{:s} -> {:s}", mn, txt);
         ModulationDisplayInfoWindowStrings mss;
+
         p->get_display_of_modulation_depth(
             pdisp, synth->getModDepth(pid, modsource, current_scene, modsource_index),
             synth->isBipolarModulation(modsource), Parameter::InfoWindow, &mss);
+
         if (mss.val != "")
         {
             paramInfowindow->setLabels(pname, pdisp);

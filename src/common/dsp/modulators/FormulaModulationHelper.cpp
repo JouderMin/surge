@@ -1,17 +1,24 @@
 /*
-** Surge Synthesizer is Free and Open Source Software
-**
-** Surge is made available under the Gnu General Public License, v3.0
-** https://www.gnu.org/licenses/gpl-3.0.en.html
-**
-** Copyright 2004-2021 by various individuals as described by the Git transaction log
-**
-** All source at: https://github.com/surge-synthesizer/surge.git
-**
-** Surge was a commercial product from 2004-2018, with Copyright and ownership
-** in that period held by Claes Johanson at Vember Audio. Claes made Surge
-** open source in September 2018.
-*/
+ * Surge XT - a free and open source hybrid synthesizer,
+ * built by Surge Synth Team
+ *
+ * Learn more at https://surge-synthesizer.github.io/
+ *
+ * Copyright 2018-2023, various authors, as described in the GitHub
+ * transaction log.
+ *
+ * Surge XT is released under the GNU General Public Licence v3
+ * or later (GPL-3.0-or-later). The license is found in the "LICENSE"
+ * file in the root of this repository, or at
+ * https://www.gnu.org/licenses/gpl-3.0.en.html
+ *
+ * Surge was a commercial product from 2004-2018, copyright and ownership
+ * held by Claes Johanson at Vember Audio during that period.
+ * Claes made Surge open source in September 2018.
+ *
+ * All source for Surge XT is available at
+ * https://github.com/surge-synthesizer/surge
+ */
 
 #include "FormulaModulationHelper.h"
 #include "LuaSupport.h"
@@ -37,8 +44,10 @@ bool prepareForEvaluation(SurgeStorage *storage, FormulaModulatorStorage *fs, Ev
         static int aid = 1;
         if (stateData.audioState == nullptr)
         {
+#if HAS_LUA
             stateData.audioState = lua_open();
             luaL_openlibs((lua_State *)(stateData.audioState));
+#endif
             firstTimeThrough = true;
         }
         s.L = (lua_State *)(stateData.audioState);
@@ -52,8 +61,10 @@ bool prepareForEvaluation(SurgeStorage *storage, FormulaModulatorStorage *fs, Ev
         static int did = 1;
         if (stateData.displayState == nullptr)
         {
+#if HAS_LUA
             stateData.displayState = lua_open();
             luaL_openlibs((lua_State *)(stateData.displayState));
+#endif
             firstTimeThrough = true;
         }
         s.L = (lua_State *)(stateData.displayState);
@@ -62,6 +73,8 @@ bool prepareForEvaluation(SurgeStorage *storage, FormulaModulatorStorage *fs, Ev
         if (did < 0)
             did = 1;
     }
+
+#if HAS_LUA
 
     auto lg = Surge::LuaSupport::SGLD("prepareForEvaluation", s.L);
 
@@ -386,11 +399,14 @@ end
 
     if (s.raisedError)
         std::cout << "ERROR: " << s.error << std::endl;
+#endif
+
     return true;
 }
 
 void removeFunctionsAssociatedWith(SurgeStorage *storage, FormulaModulatorStorage *fs)
 {
+#if HAS_LUA
     auto &stateData = *storage->formulaGlobalData;
 
     auto S = stateData.audioState;
@@ -408,16 +424,19 @@ void removeFunctionsAssociatedWith(SurgeStorage *storage, FormulaModulatorStorag
 #endif
 
     stateData.functionsPerFMS.erase(fs);
+#endif
 }
 
 bool cleanEvaluatorState(EvaluatorState &s)
 {
+#if HAS_LUA
     if (s.L && s.stateName[0] != 0)
     {
         lua_pushnil(s.L);
         lua_setglobal(s.L, s.stateName);
         s.stateName[0] = 0;
     }
+#endif
     return true;
 }
 
@@ -432,6 +451,7 @@ bool initEvaluatorState(EvaluatorState &s)
 void valueAt(int phaseIntPart, float phaseFracPart, SurgeStorage *storage,
              FormulaModulatorStorage *fs, EvaluatorState *s, float output[max_formula_outputs])
 {
+#if HAS_LUA
     s->activeoutputs = 1;
     memset(output, 0, max_formula_outputs * sizeof(float));
     if (s->L == nullptr)
@@ -686,10 +706,13 @@ void valueAt(int phaseIntPart, float phaseFracPart, SurgeStorage *storage,
         lua_pop(s->L, 1);
         return;
     }
+#else
+#endif
 }
 
 std::vector<DebugRow> createDebugDataOfModState(const EvaluatorState &es)
 {
+#if HAS_LUA
     std::vector<DebugRow> rows;
     Surge::LuaSupport::SGLD guard("debugViewGuard", es.L);
     lua_getglobal(es.L, es.stateName);
@@ -788,6 +811,9 @@ std::vector<DebugRow> createDebugDataOfModState(const EvaluatorState &es)
     rec(0, false);
     lua_pop(es.L, -1);
     return rows;
+#else
+    return {};
+#endif
 }
 std::string createDebugViewOfModState(const EvaluatorState &es)
 {
@@ -852,6 +878,7 @@ void setupEvaluatorStateFrom(EvaluatorState &s, const SurgeVoice *v)
 std::variant<float, std::string, bool> runOverModStateForTesting(const std::string &query,
                                                                  const EvaluatorState &es)
 {
+#if HAS_LUA
     Surge::LuaSupport::SGLD guard("runOverModStateForTesting", es.L);
 
     std::string emsg;
@@ -891,6 +918,7 @@ std::variant<float, std::string, bool> runOverModStateForTesting(const std::stri
         return res;
     }
     lua_pop(es.L, -1);
+#endif
     return false;
 }
 

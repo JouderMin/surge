@@ -1,7 +1,30 @@
-#pragma once
+/*
+ * Surge XT - a free and open source hybrid synthesizer,
+ * built by Surge Synth Team
+ *
+ * Learn more at https://surge-synthesizer.github.io/
+ *
+ * Copyright 2018-2023, various authors, as described in the GitHub
+ * transaction log.
+ *
+ * Surge XT is released under the GNU General Public Licence v3
+ * or later (GPL-3.0-or-later). The license is found in the "LICENSE"
+ * file in the root of this repository, or at
+ * https://www.gnu.org/licenses/gpl-3.0.en.html
+ *
+ * Surge was a commercial product from 2004-2018, copyright and ownership
+ * held by Claes Johanson at Vember Audio during that period.
+ * Claes made Surge open source in September 2018.
+ *
+ * All source for Surge XT is available at
+ * https://github.com/surge-synthesizer/surge
+ */
+#ifndef SURGE_SRC_COMMON_DSP_EFFECTS_CHOWDSP_TAPE_HYSTERESISOPS_H
+#define SURGE_SRC_COMMON_DSP_EFFECTS_CHOWDSP_TAPE_HYSTERESISOPS_H
 
 #include <cmath>
-#include "FastMath.h"
+#include "globals.h"
+#include "sst/basic-blocks/dsp/FastMath.h"
 
 #define CHOWTAPE_HYSTERESIS_USE_SIMD 1
 
@@ -65,8 +88,8 @@ static inline __m128d tanhSIMD(__m128d x)
 {
     auto xc = _mm_min_pd(F(5.7), _mm_max_pd(F(-5.7), x));
 
-    static const __m128d v2027025 = F(2027025.0), v270270 = F(270270.0), v6930 = F(6930.0),
-                         v36 = F(36.0), v945945 = F(945945.0), v51975 = F(51975.0), v630 = F(630.0);
+    const __m128d v2027025 = F(2027025.0), v270270 = F(270270.0), v6930 = F(6930.0), v36 = F(36.0),
+                  v945945 = F(945945.0), v51975 = F(51975.0), v630 = F(630.0);
 
     auto x2 = M(xc, xc);
     auto numerator = M(xc, A(v2027025, M(x2, A(v270270, M(x2, A(v6930, M(v36, x2)))))));
@@ -207,3 +230,5 @@ static inline Float hysteresisFuncPrime(Float H_d, Float dMdt, HysteresisState &
 #undef F
 
 } // namespace HysteresisOps
+
+#endif // SURGE_SRC_COMMON_DSP_EFFECTS_CHOWDSP_TAPE_HYSTERESISOPS_H

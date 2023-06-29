@@ -1,20 +1,27 @@
 /*
- ** Surge Synthesizer is Free and Open Source Software
- **
- ** Surge is made available under the Gnu General Public License, v3.0
- ** https://www.gnu.org/licenses/gpl-3.0.en.html
- **
- ** Copyright 2004-2022 by various individuals as described by the Git transaction log
- **
- ** All source at: https://github.com/surge-synthesizer/surge.git
- **
- ** Surge was a commercial product from 2004-2018, with Copyright and ownership
- ** in that period held by Claes Johanson at Vember Audio. Claes made Surge
- ** open source in September 2018.
+ * Surge XT - a free and open source hybrid synthesizer,
+ * built by Surge Synth Team
+ *
+ * Learn more at https://surge-synthesizer.github.io/
+ *
+ * Copyright 2018-2023, various authors, as described in the GitHub
+ * transaction log.
+ *
+ * Surge XT is released under the GNU General Public Licence v3
+ * or later (GPL-3.0-or-later). The license is found in the "LICENSE"
+ * file in the root of this repository, or at
+ * https://www.gnu.org/licenses/gpl-3.0.en.html
+ *
+ * Surge was a commercial product from 2004-2018, copyright and ownership
+ * held by Claes Johanson at Vember Audio during that period.
+ * Claes made Surge open source in September 2018.
+ *
+ * All source for Surge XT is available at
+ * https://github.com/surge-synthesizer/surge
  */
 
-#ifndef SURGE_SURGEGUIEDITORKEYBOARDACTIONS_H
-#define SURGE_SURGEGUIEDITORKEYBOARDACTIONS_H
+#ifndef SURGE_SRC_SURGE_XT_GUI_SURGEGUIEDITORKEYBOARDACTIONS_H
+#define SURGE_SRC_SURGE_XT_GUI_SURGEGUIEDITORKEYBOARDACTIONS_H
 
 #include <string>
 #include "SurgeGUIUtils.h"
@@ -31,6 +38,7 @@ enum KeyboardActions
     SAVE_PATCH,
     FIND_PATCH,
     FAVORITE_PATCH,
+    INITIALIZE_PATCH,
 
     PREV_PATCH,
     NEXT_PATCH,
@@ -44,6 +52,7 @@ enum KeyboardActions
 
     // TODO: FIX SCENE ASSUMPTION
     TOGGLE_SCENE,
+    TOGGLE_MODULATOR_ARM,
 
 #if WINDOWS
     TOGGLE_DEBUG_CONSOLE,
@@ -52,7 +61,13 @@ enum KeyboardActions
     SHOW_LFO_EDITOR,
     SHOW_MODLIST,
     SHOW_TUNING_EDITOR,
+    TOGGLE_OSCILLOSCOPE,
     TOGGLE_VIRTUAL_KEYBOARD,
+
+    VKB_OCTAVE_DOWN,
+    VKB_OCTAVE_UP,
+    VKB_VELOCITY_DOWN_10PCT,
+    VKB_VELOCITY_UP_10PCT,
 
     ZOOM_TO_DEFAULT,
     ZOOM_PLUS_10,
@@ -68,6 +83,8 @@ enum KeyboardActions
 
     OPEN_MANUAL,
     TOGGLE_ABOUT,
+
+    ANNOUNCE_STATE,
 
     n_kbdActions
 };
@@ -87,6 +104,8 @@ inline std::string keyboardActionName(KeyboardActions a)
         return "FIND_PATCH";
     case FAVORITE_PATCH:
         return "FAVORITE_PATCH";
+    case INITIALIZE_PATCH:
+        return "INITIALIZE_PATCH";
 
     case PREV_PATCH:
         return "PREV_PATCH";
@@ -108,6 +127,8 @@ inline std::string keyboardActionName(KeyboardActions a)
     // TODO: FIX SCENE ASSUMPTION
     case TOGGLE_SCENE:
         return "TOGGLE_SCENE";
+    case TOGGLE_MODULATOR_ARM:
+        return "TOGGLE_MODULATOR_ARM";
 
 #if WINDOWS
     case TOGGLE_DEBUG_CONSOLE:
@@ -123,6 +144,17 @@ inline std::string keyboardActionName(KeyboardActions a)
         return "SHOW_TUNING_EDITOR";
     case TOGGLE_VIRTUAL_KEYBOARD:
         return "TOGGLE_VIRTUAL_KEYBOARD";
+    case TOGGLE_OSCILLOSCOPE:
+        return "TOGGLE_OSCILLOSCOPE";
+
+    case VKB_OCTAVE_DOWN:
+        return "VKB_OCTAVE_DOWN";
+    case VKB_OCTAVE_UP:
+        return "VKB_OCTAVE_UP";
+    case VKB_VELOCITY_DOWN_10PCT:
+        return "VKB_VELOCITY_DOWN_10%";
+    case VKB_VELOCITY_UP_10PCT:
+        return "VKB_VELOCITY_UP_10%";
 
     case ZOOM_TO_DEFAULT:
         return "ZOOM_TO_DEFAULT";
@@ -149,6 +181,8 @@ inline std::string keyboardActionName(KeyboardActions a)
         return "OPEN_MANUAL";
     case TOGGLE_ABOUT:
         return "TOGGLE_ABOUT";
+    case ANNOUNCE_STATE:
+        return "ANNOUNCE_STATE";
 
     case n_kbdActions:
         jassert(false);
@@ -183,6 +217,9 @@ inline std::string keyboardActionDescription(KeyboardActions a)
     case FAVORITE_PATCH:
         desc = "Mark Patch as Favorite";
         break;
+    case INITIALIZE_PATCH:
+        desc = "Initialize Patch";
+        break;
 
     case PREV_PATCH:
         desc = "Previous Patch";
@@ -213,6 +250,10 @@ inline std::string keyboardActionDescription(KeyboardActions a)
         desc = "Toggle Scene A/B";
         break;
 
+    case TOGGLE_MODULATOR_ARM:
+        desc = "Toggle Modulator Armed State";
+        break;
+
 #if WINDOWS
     case TOGGLE_DEBUG_CONSOLE:
         desc = "Debug Console";
@@ -232,6 +273,27 @@ inline std::string keyboardActionDescription(KeyboardActions a)
         break;
     case TOGGLE_VIRTUAL_KEYBOARD:
         desc = "Virtual Keyboard";
+        break;
+    case TOGGLE_OSCILLOSCOPE:
+        desc = "Oscilloscope";
+        break;
+
+    case VKB_OCTAVE_DOWN:
+        desc = Surge::GUI::toOSCase("Virtual Keyboard: ") + Surge::GUI::toOSCase("Octave Down");
+        skipOSCase = true;
+        break;
+    case VKB_OCTAVE_UP:
+        desc = Surge::GUI::toOSCase("Virtual Keyboard: ") + Surge::GUI::toOSCase("Octave Up");
+        skipOSCase = true;
+        break;
+    case VKB_VELOCITY_DOWN_10PCT:
+        desc =
+            Surge::GUI::toOSCase("Virtual Keyboard: ") + Surge::GUI::toOSCase("Velocity Down 10%");
+        skipOSCase = true;
+        break;
+    case VKB_VELOCITY_UP_10PCT:
+        desc = Surge::GUI::toOSCase("Virtual Keyboard: ") + Surge::GUI::toOSCase("Velocity Up 10%");
+        skipOSCase = true;
         break;
 
     case ZOOM_TO_DEFAULT:
@@ -270,6 +332,9 @@ inline std::string keyboardActionDescription(KeyboardActions a)
     case TOGGLE_ABOUT:
         desc = "About Surge XT";
         skipOSCase = true;
+        break;
+    case ANNOUNCE_STATE:
+        desc = "Announce Editor State with Accessible API";
         break;
 
     default:

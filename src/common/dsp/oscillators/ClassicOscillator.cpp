@@ -1,20 +1,31 @@
 /*
-** Surge Synthesizer is Free and Open Source Software
-**
-** Surge is made available under the Gnu General Public License, v3.0
-** https://www.gnu.org/licenses/gpl-3.0.en.html
-**
-** Copyright 2004-2020 by various individuals as described by the Git transaction log
-**
-** All source at: https://github.com/surge-synthesizer/surge.git
-**
-** Surge was a commercial product from 2004-2018, with Copyright and ownership
-** in that period held by Claes Johanson at Vember Audio. Claes made Surge
-** open source in September 2018.
-*/
+ * Surge XT - a free and open source hybrid synthesizer,
+ * built by Surge Synth Team
+ *
+ * Learn more at https://surge-synthesizer.github.io/
+ *
+ * Copyright 2018-2023, various authors, as described in the GitHub
+ * transaction log.
+ *
+ * Surge XT is released under the GNU General Public Licence v3
+ * or later (GPL-3.0-or-later). The license is found in the "LICENSE"
+ * file in the root of this repository, or at
+ * https://www.gnu.org/licenses/gpl-3.0.en.html
+ *
+ * Surge was a commercial product from 2004-2018, copyright and ownership
+ * held by Claes Johanson at Vember Audio during that period.
+ * Claes made Surge open source in September 2018.
+ *
+ * All source for Surge XT is available at
+ * https://github.com/surge-synthesizer/surge
+ */
 
 #include "ClassicOscillator.h"
 #include "DSPUtils.h"
+
+#include "sst/basic-blocks/mechanics/block-ops.h"
+#include "sst/basic-blocks/mechanics/simd-ops.h"
+namespace mech = sst::basic_blocks::mechanics;
 
 /*
 **
@@ -65,7 +76,7 @@
 ** The storage buffer is sized so there is enough room to run a FIR model of the DAC
 ** forward in time from the point of the current buffer. This means when we wrap
 ** the buffer position we need to copy the back-end FIR buffer into the front of the new
-** buffer. Other than that subtletly, the buffer is just a ring.
+** buffer. Other than that subtlety, the buffer is just a ring.
 **
 ** There's lots more details but that's the basic operating model you will see in
 ** ::process_block once you know that ::convolute generates the next blast
@@ -196,8 +207,7 @@ void ClassicOscillator::init(float pitch, bool is_display, bool nonzero_init_dri
     l_sub.setRate(rate);
     l_sync.setRate(rate);
 
-    n_unison =
-        limit_range(localcopy[oscdata->p[co_unison_voices].param_id_in_scene].i, 1, MAX_UNISON);
+    n_unison = limit_range(oscdata->p[co_unison_voices].val.i, 1, MAX_UNISON);
 
     if (is_display)
     {
@@ -430,7 +440,7 @@ template <bool FM> void ClassicOscillator::convolute(int voice, bool stereo)
         t = storage->note_to_pitch_inv_tuningctr(detune + sync);
     }
 
-    float t_inv = rcp(t);
+    float t_inv = mech::rcp(t);
     float g = 0.0, gR = 0.0;
 
     /*
@@ -635,7 +645,7 @@ void ClassicOscillator::process_block(float pitch0, float drift, bool stereo, bo
             {
                 while (((l_sync.v > 0) && (syncstate[l] < a)) || (oscstate[l] < a))
                 {
-                    FMmul_inv = rcp(fmmul);
+                    FMmul_inv = mech::rcp(fmmul);
 
                     // The division races with the growth of the oscstate so that it never comes out
                     // of/gets out of the loop this becomes unsafe, don't fuck with the oscstate but
@@ -791,14 +801,14 @@ void ClassicOscillator::process_block(float pitch0, float drift, bool stereo, bo
     /*
     ** And clean up and advance our buffer pointer
     */
-    clear_block(&oscbuffer[bufpos], BLOCK_SIZE_OS_QUAD);
+    mech::clear_block<BLOCK_SIZE_OS>(&oscbuffer[bufpos]);
 
     if (stereo)
     {
-        clear_block(&oscbufferR[bufpos], BLOCK_SIZE_OS_QUAD);
+        mech::clear_block<BLOCK_SIZE_OS>(&oscbufferR[bufpos]);
     }
 
-    clear_block(&dcbuffer[bufpos], BLOCK_SIZE_OS_QUAD);
+    mech::clear_block<BLOCK_SIZE_OS>(&dcbuffer[bufpos]);
 
     bufpos = (bufpos + BLOCK_SIZE_OS) & (OB_LENGTH - 1);
 

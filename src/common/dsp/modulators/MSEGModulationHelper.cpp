@@ -1,24 +1,31 @@
 /*
-** Surge Synthesizer is Free and Open Source Software
-**
-** Surge is made available under the Gnu General Public License, v3.0
-** https://www.gnu.org/licenses/gpl-3.0.en.html
-**
-** Copyright 2004-2020 by various individuals as described by the Git transaction log
-**
-** All source at: https://github.com/surge-synthesizer/surge.git
-**
-** Surge was a commercial product from 2004-2018, with Copyright and ownership
-** in that period held by Claes Johanson at Vember Audio. Claes made Surge
-** open source in September 2018.
-*/
+ * Surge XT - a free and open source hybrid synthesizer,
+ * built by Surge Synth Team
+ *
+ * Learn more at https://surge-synthesizer.github.io/
+ *
+ * Copyright 2018-2023, various authors, as described in the GitHub
+ * transaction log.
+ *
+ * Surge XT is released under the GNU General Public Licence v3
+ * or later (GPL-3.0-or-later). The license is found in the "LICENSE"
+ * file in the root of this repository, or at
+ * https://www.gnu.org/licenses/gpl-3.0.en.html
+ *
+ * Surge was a commercial product from 2004-2018, copyright and ownership
+ * held by Claes Johanson at Vember Audio during that period.
+ * Claes made Surge open source in September 2018.
+ *
+ * All source for Surge XT is available at
+ * https://github.com/surge-synthesizer/surge
+ */
 
 #include "MSEGModulationHelper.h"
 #include <cmath>
 #include <iostream>
 #include "DebugHelpers.h"
 #include "basic_dsp.h" // for limit_range
-#include "FastMath.h"
+#include "sst/basic-blocks/dsp/FastMath.h"
 
 namespace Surge
 {
@@ -263,6 +270,7 @@ float valueAt(int ip, float fup, float df, MSEGStorage *ms, EvaluatorState *es, 
     {
         if (lv0 == lv1)
         {
+            es->timeAlongSegment = timeAlongSegment;
             return lv0;
         }
 
@@ -1125,6 +1133,21 @@ void deleteSegment(MSEGStorage *ms, int idx)
 
     ms->n_activeSegments--;
 
+    if (ms->editMode == MSEGStorage::LFO)
+    {
+        // We need to fill up the last one to span.
+        auto ei = ms->n_activeSegments - 1;
+        ms->segmentEnd[ei] = 1.0;
+        auto cd = 0.f;
+        for (int i = 0; i < ei; ++i)
+            cd += ms->segments[i].duration;
+
+        ms->segments[ei].duration = 1.0 - cd;
+        ms->segments[ei].cpduration += 1.0 - cd;
+
+        rebuildCache(ms);
+    }
+
     if (ms->loop_start > idx)
     {
         ms->loop_start--;
@@ -1215,7 +1238,7 @@ void mirrorMSEG(MSEGStorage *ms)
 
     while (h < t)
     {
-        // endponts become starting points
+        // endpoints become starting points
         std::swap(ms->segments[h], ms->segments[t]);
         ms->segments[h].v0 = ms->segments[h].nv1;
         ms->segments[t].v0 = ms->segments[t].nv1;

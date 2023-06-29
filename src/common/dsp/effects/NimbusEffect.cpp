@@ -1,21 +1,29 @@
 /*
-** Surge Synthesizer is Free and Open Source Software
-**
-** Surge is made available under the Gnu General Public License, v3.0
-** https://www.gnu.org/licenses/gpl-3.0.en.html
-**
-** Copyright 2004-2021 by various individuals as described by the Git transaction log
-**
-** All source at: https://github.com/surge-synthesizer/surge.git
-**
-** Surge was a commercial product from 2004-2018, with Copyright and ownership
-** in that period held by Claes Johanson at Vember Audio. Claes made Surge
-** open source in September 2018.
-*/
+ * Surge XT - a free and open source hybrid synthesizer,
+ * built by Surge Synth Team
+ *
+ * Learn more at https://surge-synthesizer.github.io/
+ *
+ * Copyright 2018-2023, various authors, as described in the GitHub
+ * transaction log.
+ *
+ * Surge XT is released under the GNU General Public Licence v3
+ * or later (GPL-3.0-or-later). The license is found in the "LICENSE"
+ * file in the root of this repository, or at
+ * https://www.gnu.org/licenses/gpl-3.0.en.html
+ *
+ * Surge was a commercial product from 2004-2018, copyright and ownership
+ * held by Claes Johanson at Vember Audio during that period.
+ * Claes made Surge open source in September 2018.
+ *
+ * All source for Surge XT is available at
+ * https://github.com/surge-synthesizer/surge
+ */
 
 #include "NimbusEffect.h"
 #include "samplerate.h"
 #include "DebugHelpers.h"
+#include "fmt/core.h"
 
 #ifdef _MSC_VER
 #define __attribute__(x)
@@ -115,11 +123,11 @@ void NimbusEffect::process(float *dataL, float *dataR)
         int outpos = 0;
 
         processor->set_playback_mode(
-            (clouds::PlaybackMode)((int)clouds::PLAYBACK_MODE_GRANULAR + *pdata_ival[nmb_mode]));
-        processor->set_quality(*pdata_ival[nmb_quality]);
+            (clouds::PlaybackMode)((int)clouds::PLAYBACK_MODE_GRANULAR + *pd_int[nmb_mode]));
+        processor->set_quality(*pd_int[nmb_quality]);
 
         int consume_ptr = 0;
-        while (frames_to_go >= nimbusprocess_blocksize)
+        while (frames_to_go + numStubs >= nimbusprocess_blocksize)
         {
             int sp = 0;
             while (numStubs > 0)
@@ -143,18 +151,18 @@ void NimbusEffect::process(float *dataL, float *dataR)
 
             float den_val, tex_val;
 
-            den_val = (*f[nmb_density] + 1.f) * 0.5;
-            tex_val = (*f[nmb_texture] + 1.f) * 0.5;
+            den_val = (*pd_float[nmb_density] + 1.f) * 0.5;
+            tex_val = (*pd_float[nmb_texture] + 1.f) * 0.5;
 
-            parm->position = clamp01(*f[nmb_position]);
-            parm->size = clamp01(*f[nmb_size]);
+            parm->position = clamp01(*pd_float[nmb_position]);
+            parm->size = clamp01(*pd_float[nmb_size]);
             parm->density = clamp01(den_val);
             parm->texture = clamp01(tex_val);
-            parm->pitch = limit_range(*f[nmb_pitch], -48.f, 48.f);
-            parm->stereo_spread = clamp01(*f[nmb_spread]);
-            parm->feedback = clamp01(*f[nmb_feedback]);
-            parm->freeze = *f[nmb_freeze] > 0.5;
-            parm->reverb = clamp01(*f[nmb_reverb]);
+            parm->pitch = limit_range(*pd_float[nmb_pitch], -48.f, 48.f);
+            parm->stereo_spread = clamp01(*pd_float[nmb_spread]);
+            parm->feedback = clamp01(*pd_float[nmb_feedback]);
+            parm->freeze = *pd_float[nmb_freeze] > 0.5;
+            parm->reverb = clamp01(*pd_float[nmb_reverb]);
             parm->dry_wet = 1.f;
 
             parm->trigger = false;     // this is an external granulating source. Skip it
@@ -174,38 +182,47 @@ void NimbusEffect::process(float *dataL, float *dataR)
 
         if (frames_to_go > 0)
         {
-            numStubs = frames_to_go;
-            for (int i = 0; i < numStubs; ++i)
+            int startSub = numStubs;
+            int addStub = frames_to_go;
+            numStubs += frames_to_go;
+
+            for (int i = 0; i < addStub; ++i)
             {
-                stub_input[0][i] = resample_into[consume_ptr][0];
-                stub_input[1][i] = resample_into[consume_ptr][1];
+                stub_input[0][i + startSub] = resample_into[consume_ptr][0];
+                stub_input[1][i + startSub] = resample_into[consume_ptr][1];
                 consume_ptr++;
             }
         }
 
-        SRC_DATA odata;
-        odata.end_of_input = 0;
-        odata.src_ratio = processor_sr_inv * storage->samplerate;
-        odata.data_in = &(resample_this[0][0]);
-        odata.data_out = &(resample_into[0][0]);
-        odata.input_frames = outpos;
-        odata.output_frames = BLOCK_SIZE << 3;
-        auto reso = src_process(euroSR_to_surgeSR, &odata);
-        if (!builtBuffer)
-            created += odata.output_frames_gen;
-
-        size_t w = resampWritePtr;
-        for (int i = 0; i < odata.output_frames_gen; ++i)
+        if (outpos > 0)
         {
-            resampled_output[w][0] = resample_into[i][0];
-            resampled_output[w][1] = resample_into[i][1];
+            SRC_DATA odata;
+            odata.end_of_input = 0;
+            odata.src_ratio = processor_sr_inv * storage->samplerate;
+            odata.data_in = &(resample_this[0][0]);
+            odata.data_out = &(resample_into[0][0]);
+            odata.input_frames = outpos;
+            odata.output_frames = BLOCK_SIZE << 3;
+            auto reso = src_process(euroSR_to_surgeSR, &odata);
+            if (!builtBuffer)
+                created += odata.output_frames_gen;
 
-            w = (w + 1U) & (raw_out_sz - 1U);
+            size_t w = resampWritePtr;
+            for (int i = 0; i < odata.output_frames_gen; ++i)
+            {
+                resampled_output[w][0] = resample_into[i][0];
+                resampled_output[w][1] = resample_into[i][1];
+
+                w = (w + 1U) & (raw_out_sz - 1U);
+            }
+            resampWritePtr = w;
         }
-        resampWritePtr = w;
     }
 
-    bool rpi = (created) > (BLOCK_SIZE + 8); // leave some buffer
+    // If you hit this you need to adjust this gapping ratio probably.
+    static_assert(BLOCK_SIZE >= nimbusprocess_blocksize);
+    int ratio = std::max((int)std::ceil(processor_sr_inv * storage->samplerate) - 2, 0);
+    bool rpi = (created) > (BLOCK_SIZE * (1 + ratio) + 8); // leave some buffer
     if (rpi)
         builtBuffer = true;
 
@@ -218,7 +235,7 @@ void NimbusEffect::process(float *dataL, float *dataR)
     }
     resampReadPtr = rp;
 
-    mix.set_target_smoothed(clamp01(*f[nmb_mix]));
+    mix.set_target_smoothed(clamp01(*pd_float[nmb_mix]));
     mix.fade_2_blocks_to(dataL, L, dataR, R, dataL, dataR, BLOCK_SIZE_QUAD);
 }
 
@@ -269,42 +286,42 @@ void NimbusEffect::init_ctrltypes()
             auto fx = &(p->storage->getPatch().fx[p->ctrlgroup_entry]);
             auto idx = p - fx->p;
 
-            static char res[TXT_SIZE];
-            res[0] = 0;
+            static std::string res;
             auto mode = fx->p[nmb_mode].val.i;
+
             switch (mode)
             {
             case 0:
                 if (idx == nmb_density)
-                    snprintf(res, TXT_SIZE, "%s", "Density");
+                    res = "Density";
                 if (idx == nmb_texture)
-                    snprintf(res, TXT_SIZE, "%s", "Texture");
+                    res = "Texture";
                 if (idx == nmb_size)
-                    snprintf(res, TXT_SIZE, "%s", "Size");
+                    res = "Size";
                 break;
             case 1:
             case 2:
                 if (idx == nmb_density)
-                    snprintf(res, TXT_SIZE, "%s", "Diffusion");
+                    res = "Diffusion";
                 if (idx == nmb_texture)
-                    snprintf(res, TXT_SIZE, "%s", "Filter");
+                    res = "Filter";
                 if (idx == nmb_size)
-                    snprintf(res, TXT_SIZE, "%s", "Size");
+                    res = "Size";
                 break;
             case 3:
                 if (idx == nmb_density)
-                    snprintf(res, TXT_SIZE, "%s", "Smear");
+                    res = "Smear";
                 if (idx == nmb_texture)
-                    snprintf(res, TXT_SIZE, "%s", "Texture");
+                    res = "Texture";
                 if (idx == nmb_size)
-                    snprintf(res, TXT_SIZE, "%s", "Warp");
+                    res = "Warp";
                 break;
             }
 
-            return res;
+            return res.c_str();
         }
 
-        const bool getValue(const Parameter *p) const override
+        bool getValue(const Parameter *p) const override
         {
             auto fx = &(p->storage->getPatch().fx[p->ctrlgroup_entry]);
             auto idx = p - fx->p;
@@ -335,7 +352,7 @@ void NimbusEffect::init_ctrltypes()
 
     static struct SpreadDeactivator : public ParameterDynamicDeactivationFunction
     {
-        const bool getValue(const Parameter *p) const
+        bool getValue(const Parameter *p) const
         {
             auto fx = &(p->storage->getPatch().fx[p->ctrlgroup_entry]);
             auto mode = fx->p[nmb_mode].val.i;
@@ -387,7 +404,7 @@ void NimbusEffect::init_ctrltypes()
 
     ypos += 2;
     fxdata->p[nmb_freeze].set_name("Freeze");
-    fxdata->p[nmb_freeze].set_type(ct_float_toggle); // so it is modulatable. 50% above is frozen
+    fxdata->p[nmb_freeze].set_type(ct_float_toggle); // so that it can be modulated
     fxdata->p[nmb_freeze].posy_offset = ypos;
     fxdata->p[nmb_feedback].set_name("Feedback");
     fxdata->p[nmb_feedback].set_type(ct_percent);

@@ -1,20 +1,27 @@
 /*
- ** Surge Synthesizer is Free and Open Source Software
- **
- ** Surge is made available under the Gnu General Public License, v3.0
- ** https://www.gnu.org/licenses/gpl-3.0.en.html
- **
- ** Copyright 2004-2021 by various individuals as described by the Git transaction log
- **
- ** All source at: https://github.com/surge-synthesizer/surge.git
- **
- ** Surge was a commercial product from 2004-2018, with Copyright and ownership
- ** in that period held by Claes Johanson at Vember Audio. Claes made Surge
- ** open source in September 2018.
+ * Surge XT - a free and open source hybrid synthesizer,
+ * built by Surge Synth Team
+ *
+ * Learn more at https://surge-synthesizer.github.io/
+ *
+ * Copyright 2018-2023, various authors, as described in the GitHub
+ * transaction log.
+ *
+ * Surge XT is released under the GNU General Public Licence v3
+ * or later (GPL-3.0-or-later). The license is found in the "LICENSE"
+ * file in the root of this repository, or at
+ * https://www.gnu.org/licenses/gpl-3.0.en.html
+ *
+ * Surge was a commercial product from 2004-2018, copyright and ownership
+ * held by Claes Johanson at Vember Audio during that period.
+ * Claes made Surge open source in September 2018.
+ *
+ * All source for Surge XT is available at
+ * https://github.com/surge-synthesizer/surge
  */
 
-#ifndef SURGE_XT_OSCILLATORWAVEFORMDISPLAY_H
-#define SURGE_XT_OSCILLATORWAVEFORMDISPLAY_H
+#ifndef SURGE_SRC_SURGE_XT_GUI_WIDGETS_OSCILLATORWAVEFORMDISPLAY_H
+#define SURGE_SRC_SURGE_XT_GUI_WIDGETS_OSCILLATORWAVEFORMDISPLAY_H
 
 #include "SkinSupport.h"
 #include "Parameter.h"
@@ -23,6 +30,7 @@
 
 #include "juce_gui_basics/juce_gui_basics.h"
 #include "Oscillator.h"
+#include "AccessibleHelpers.h"
 
 class SurgeStorage;
 class SurgeGUIEditor;
@@ -61,13 +69,16 @@ struct OscillatorWaveformDisplay : public juce::Component,
         oscInScene = oscdata->p[0].ctrlgroup_entry;
     }
 
-    SurgeGUIEditor *sge;
+    bool isMuted{false};
+
+    SurgeGUIEditor *sge{nullptr};
     void setSurgeGUIEditor(SurgeGUIEditor *s) { sge = s; }
 
     void onOscillatorTypeChanged();
     std::string getCurrentWavetableName();
 
     void repaintIfIdIsInRange(int id);
+    void repaintBasedOnOscMuteState();
 
     ::Oscillator *setupOscillator();
     unsigned char oscbuffer alignas(16)[oscillator_buffer_size];
@@ -90,9 +101,10 @@ struct OscillatorWaveformDisplay : public juce::Component,
 
     void loadWavetable(int id);
     void loadWavetableFromFile();
-    void populateMenu(juce::PopupMenu &m, int selectedItem);
-    bool populateMenuForCategory(juce::PopupMenu &parent, int categoryId, int selectedItem);
-    void showWavetableMenu();
+    void populateMenu(juce::PopupMenu &m, int selectedItem, bool singleCategory = false);
+    bool populateMenuForCategory(juce::PopupMenu &parent, int categoryId, int selectedItem,
+                                 bool intoTop = false);
+    void showWavetableMenu(bool singleCategory = false);
     void createWTMenu(const bool useComponentBounds);
     void createWTMenuItems(juce::PopupMenu &contextMenu, bool centered = false,
                            bool add2D3Dswitch = false);

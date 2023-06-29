@@ -40,6 +40,7 @@ build_flavor()
     flavorprod=$2
     ident=$3
     loc=$4
+    extraSigningArgs=$5
 
     echo --- BUILDING Surge_XT_${flavor}.pkg from "$flavorprod" ---
 
@@ -62,7 +63,7 @@ build_flavor()
 
       if [[ -d "$workdir/$flavorprod/Contents" ]]; then
         echo "Signing as a bundle"
-        codesign --force -s "$MAC_SIGNING_CERT" -o runtime --deep "$workdir/$flavorprod"
+        codesign --force -s "$MAC_SIGNING_CERT" -o runtime ${extraSigningArgs} --deep "$workdir/$flavorprod"
         codesign -vvv "$workdir/$flavorprod"
       fi
       if [[ -f "$workdir/$flavorprod/manifest.ttl" ]]; then
@@ -119,7 +120,7 @@ if [[ -d $INDIR/$FXLV2 ]]; then
 fi
 
 if [[ -d $INDIR/$APP ]]; then
-    build_flavor "APP" "$APP" "org.surge-synth-team.surge-xt.app.pkg" "/tmp/SXT"
+    build_flavor "APP" "$APP" "org.surge-synth-team.surge-xt.app.pkg" "/tmp/SXT" "--entitlements ${SOURCEDIR}/scripts/installer_mac/Resources/entitlements.plist"
 fi
 
 if [[ -d $INDIR/$FXAPP ]]; then
@@ -153,7 +154,7 @@ fi
 if [[ -d $INDIR/$CLAP ]]; then
 	CLAP_PKG_REF='<pkg-ref id="org.surge-synth-team.surge-xt.clap.pkg"/>'
   CLAP_CHOICE='<line choice="org.surge-synth-team.surge-xt.clap.pkg"/>'
-	CLAP_CHOICE_DEF="<choice id=\"org.surge-synth-team.surge-xt.clap.pkg\" visible=\"true\" start_selected=\"false\" title=\"Surge XT CLAP\"><pkg-ref id=\"org.surge-synth-team.surge-xt.clap.pkg\"/></choice><pkg-ref id=\"org.surge-synth-team.surge-xt.clap.pkg\" version=\"${VERSION}\" onConclusion=\"none\">Surge_XT_CLAP.pkg</pkg-ref>"
+	CLAP_CHOICE_DEF="<choice id=\"org.surge-synth-team.surge-xt.clap.pkg\" visible=\"true\" start_selected=\"true\" title=\"Surge XT CLAP\"><pkg-ref id=\"org.surge-synth-team.surge-xt.clap.pkg\"/></choice><pkg-ref id=\"org.surge-synth-team.surge-xt.clap.pkg\" version=\"${VERSION}\" onConclusion=\"none\">Surge_XT_CLAP.pkg</pkg-ref>"
 fi
 if [[ -d $INDIR/$LV2 ]]; then
 	LV2_PKG_REF='<pkg-ref id="org.surge-synth-team.surge-xt.lv2.pkg"/>'
@@ -179,7 +180,7 @@ fi
 if [[ -d $INDIR/$FXCLAP ]]; then
 	FXCLAP_PKG_REF='<pkg-ref id="org.surge-synth-team.surge-xt-fx.clap.pkg"/>'
 	FXCLAP_CHOICE='<line choice="org.surge-synth-team.surge-xt-fx.clap.pkg"/>'
-	FXCLAP_CHOICE_DEF="<choice id=\"org.surge-synth-team.surge-xt-fx.clap.pkg\" visible=\"true\" start_selected=\"false\" title=\"Surge XT Effects CLAP\"><pkg-ref id=\"org.surge-synth-team.surge-xt-fx.clap.pkg\"/></choice><pkg-ref id=\"org.surge-synth-team.surge-xt-fx.clap.pkg\" version=\"${VERSION}\" onConclusion=\"none\">Surge_XT_FXCLAP.pkg</pkg-ref>"
+	FXCLAP_CHOICE_DEF="<choice id=\"org.surge-synth-team.surge-xt-fx.clap.pkg\" visible=\"true\" start_selected=\"true\" title=\"Surge XT Effects CLAP\"><pkg-ref id=\"org.surge-synth-team.surge-xt-fx.clap.pkg\"/></choice><pkg-ref id=\"org.surge-synth-team.surge-xt-fx.clap.pkg\" version=\"${VERSION}\" onConclusion=\"none\">Surge_XT_FXCLAP.pkg</pkg-ref>"
 fi
 if [[ -d $INDIR/$FXLV2 ]]; then
 	FXLV2_PKG_REF='<pkg-ref id="org.surge-synth-team.surge-xt-fx.lv2.pkg"/>'
@@ -198,29 +199,33 @@ cat > $TMPDIR/distribution.xml << XMLEND
     <title>Surge ${VERSION}</title>
     <license file="License.txt" />
     <readme file="Readme.rtf" />
-    ${VST3_PKG_REF}
+
+    ${APP_PKG_REF}
     ${AU_PKG_REF}
     ${CLAP_PKG_REF}
     ${LV2_PKG_REF}
-    ${APP_PKG_REF}
-    ${FXVST3_PKG_REF}
+    ${VST3_PKG_REF}
+
+    ${FXAPP_PKG_REF}
     ${FXAU_PKG_REF}
     ${FXCLAP_PKG_REF}
     ${FXLV2_PKG_REF}
-    ${FXAPP_PKG_REF}
+    ${FXVST3_PKG_REF}
     <pkg-ref id="org.surge-synth-team.surge-xt.resources.pkg"/>
-    <options require-scripts="false" customize="always" />
+    <options require-scripts="false" customize="always" hostArchitectures="x86_64,arm64" rootVolumeOnly="true"/>
+    <domains enable_anywhere="false" enable_currentUserHome="false" enable_localSystem="true"/>
     <choices-outline>
-        ${VST3_CHOICE}
+        ${APP_CHOICE}
         ${AU_CHOICE}
         ${CLAP_CHOICE}
         ${LV2_CHOICE}
-        ${APP_CHOICE}
-        ${FXVST3_CHOICE}
+        ${VST3_CHOICE}
+
+        ${FXAPP_CHOICE}
         ${FXAU_CHOICE}
         ${FXCLAP_CHOICE}
         ${FXLV2_CHOICE}
-        ${FXAPP_CHOICE}
+        ${FXVST3_CHOICE}
         <line choice="org.surge-synth-team.surge-xt.resources.pkg"/>
     </choices-outline>
     ${VST3_CHOICE_DEF}

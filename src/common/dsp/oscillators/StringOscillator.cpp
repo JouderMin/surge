@@ -1,20 +1,27 @@
 /*
-** Surge Synthesizer is Free and Open Source Software
-**
-** Surge is made available under the Gnu General Public License, v3.0
-** https://www.gnu.org/licenses/gpl-3.0.en.html
-**
-** Copyright 2004-2021 by various individuals as described by the Git transaction log
-**
-** All source at: https://github.com/surge-synthesizer/surge.git
-**
-** Surge was a commercial product from 2004-2018, with Copyright and ownership
-** in that period held by Claes Johanson at Vember Audio. Claes made Surge
-** open source in September 2018.
-*/
+ * Surge XT - a free and open source hybrid synthesizer,
+ * built by Surge Synth Team
+ *
+ * Learn more at https://surge-synthesizer.github.io/
+ *
+ * Copyright 2018-2023, various authors, as described in the GitHub
+ * transaction log.
+ *
+ * Surge XT is released under the GNU General Public Licence v3
+ * or later (GPL-3.0-or-later). The license is found in the "LICENSE"
+ * file in the root of this repository, or at
+ * https://www.gnu.org/licenses/gpl-3.0.en.html
+ *
+ * Surge was a commercial product from 2004-2018, copyright and ownership
+ * held by Claes Johanson at Vember Audio during that period.
+ * Claes made Surge open source in September 2018.
+ *
+ * All source for Surge XT is available at
+ * https://github.com/surge-synthesizer/surge
+ */
 
 #include "globals.h"
-#include "FastMath.h"
+#include "sst/basic-blocks/dsp/FastMath.h"
 
 /*
  * String oscillator is a self-oscillating delay with various filters and
@@ -113,8 +120,10 @@ void StringOscillator::init(float pitch, bool is_display, bool nzi)
     else
     {
         ownDelayLines = false;
-        delayLine[0] = storage->memoryPools->stringDelayLines.getItem(storage->sinctable);
-        delayLine[1] = storage->memoryPools->stringDelayLines.getItem(storage->sinctable);
+        if (!delayLine[0])
+            delayLine[0] = storage->memoryPools->stringDelayLines.getItem(storage->sinctable);
+        if (!delayLine[1])
+            delayLine[1] = storage->memoryPools->stringDelayLines.getItem(storage->sinctable);
     }
 
     memset((void *)dustBuffer, 0, 2 * (BLOCK_SIZE_OS) * sizeof(float));
@@ -180,7 +189,7 @@ void StringOscillator::init(float pitch, bool is_display, bool nzi)
         driftLFO[i].init(nzi);
     }
 
-    auto mode = (exciter_modes)localcopy[oscdata->p[str_exciter_mode].param_id_in_scene].i;
+    auto mode = (exciter_modes)oscdata->p[str_exciter_mode].val.i;
     phase1 = 0.0, phase2 = 0.0;
 
     if (!oscdata->retrigger.val.b && !is_display)
@@ -377,7 +386,7 @@ float StringOscillator::pitchAdjustmentForStiffness()
     {
         // I just whacked at it in a tuner at levels and came up with this. These are pitch shifts
         // so basically i ran A/69/440 into a tuner with the burst chirp and saw how far we were
-        // off in frequency at 0, 25, 50 etcc then converted to notes using 12TET
+        // off in frequency at 0, 25, 50 etc... then converted to notes using 12TET
         static constexpr float retunes[] = {-0.0591202, -0.122405, -0.225738, -0.406056,
                                             -0.7590243};
         float fidx = limit_range(-4 * tv, 0.f, 4.f);
@@ -487,7 +496,7 @@ void StringOscillator::process_block(float pitch, float drift, bool stereo, bool
         }                                                                                          \
         break;
 
-    auto mode = (exciter_modes)localcopy[oscdata->p[str_exciter_mode].param_id_in_scene].i;
+    auto mode = (exciter_modes)oscdata->p[str_exciter_mode].val.i;
     auto oss = oscdata->p[str_exciter_level].deform_type & StringOscillator::os_all;
 
     switch (mode)
@@ -687,7 +696,8 @@ void StringOscillator::process_block_internal(float pitch, float drift, bool ste
 
             if (FM)
             {
-                v *= Surge::DSP::fastexp(limit_range(fmdepth.v * master_osc[i] * 3, -6.f, 4.f));
+                v *= sst::basic_blocks::dsp::fastexp(
+                    limit_range(fmdepth.v * master_osc[i] * 3, -6.f, 4.f));
             }
 
             v *= OS;

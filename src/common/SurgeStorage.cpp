@@ -1,17 +1,24 @@
 /*
-** Surge Synthesizer is Free and Open Source Software
-**
-** Surge is made available under the Gnu General Public License, v3.0
-** https://www.gnu.org/licenses/gpl-3.0.en.html
-**
-** Copyright 2004-2020 by various individuals as described by the Git transaction log
-**
-** All source at: https://github.com/surge-synthesizer/surge.git
-**
-** Surge was a commercial product from 2004-2018, with Copyright and ownership
-** in that period held by Claes Johanson at Vember Audio. Claes made Surge
-** open source in September 2018.
-*/
+ * Surge XT - a free and open source hybrid synthesizer,
+ * built by Surge Synth Team
+ *
+ * Learn more at https://surge-synthesizer.github.io/
+ *
+ * Copyright 2018-2023, various authors, as described in the GitHub
+ * transaction log.
+ *
+ * Surge XT is released under the GNU General Public Licence v3
+ * or later (GPL-3.0-or-later). The license is found in the "LICENSE"
+ * file in the root of this repository, or at
+ * https://www.gnu.org/licenses/gpl-3.0.en.html
+ *
+ * Surge was a commercial product from 2004-2018, copyright and ownership
+ * held by Claes Johanson at Vember Audio during that period.
+ * Claes made Surge open source in September 2018.
+ *
+ * All source for Surge XT is available at
+ * https://github.com/surge-synthesizer/surge
+ */
 
 #include "DSPUtils.h"
 #include "SurgeStorage.h"
@@ -20,9 +27,10 @@
 #include <cctype>
 #include <map>
 #include <queue>
-#include <vembertech/vt_dsp_endian.h>
 #include "UserDefaults.h"
+#if HAS_JUCE
 #include "SurgeSharedBinary.h"
+#endif
 #include "DebugHelpers.h"
 
 #include "sst/plugininfra/paths.h"
@@ -35,24 +43,33 @@
 #include "version.h"
 
 #include "sst/plugininfra/strnatcmp.h"
+#ifndef SURGE_SKIP_ODDSOUND_MTS
 #include "libMTSClient.h"
+#include "libMTSMaster.h"
+#endif
 #include "FxPresetAndClipboardManager.h"
 #include "ModulatorPresetManager.h"
 #include "SurgeMemoryPools.h"
+#include "sst/basic-blocks/tables/SincTableProvider.h"
 
 // FIXME probably remove this when we remove the hardcoded hack below
 #include "MSEGModulationHelper.h"
 // FIXME
 #include "FormulaModulationHelper.h"
 
+#include "sst/basic-blocks/mechanics/endian-ops.h"
+namespace mech = sst::basic_blocks::mechanics;
+
 using namespace std;
 
 std::string SurgeStorage::skipPatchLoadDataPathSentinel = "<SKIP-PATCH-SENTINEL>";
 
-SurgeStorage::SurgeStorage(std::string suppliedDataPath) : otherscene_clients(0)
+SurgeStorage::SurgeStorage(const SurgeStorage::SurgeStorageConfig &config) : otherscene_clients(0)
 {
+    auto suppliedDataPath = config.suppliedDataPath;
     bool loadWtAndPatch = true;
-    loadWtAndPatch = !skipLoadWtAndPatch && suppliedDataPath != skipPatchLoadDataPathSentinel;
+    loadWtAndPatch = !skipLoadWtAndPatch && suppliedDataPath != skipPatchLoadDataPathSentinel &&
+                     config.scanWavetableAndPatches;
 
     if (suppliedDataPath == skipPatchLoadDataPathSentinel)
         suppliedDataPath = "";
@@ -64,9 +81,9 @@ SurgeStorage::SurgeStorage(std::string suppliedDataPath) : otherscene_clients(0)
     else if (samplerate < 12000 || samplerate > 48000 * 32)
     {
         std::ostringstream oss;
-        oss << "Warning: SurgeStorage constructed with invalid samplerate :" << samplerate
-            << " - resetting to 48000 until Audio System tells us otherwise" << std::endl;
-        reportError(oss.str(), "SampleRate Corrputed on Startup");
+        oss << "Warning: SurgeStorage constructed with invalid samplerate: " << samplerate
+            << " - resetting to 48000 until audio system tells us otherwise" << std::endl;
+        reportError(oss.str(), "Sample Rate Corrupted on Startup");
         setSamplerate(48000);
     }
     else
@@ -77,45 +94,14 @@ SurgeStorage::SurgeStorage(std::string suppliedDataPath) : otherscene_clients(0)
 
     _patch.reset(new SurgePatch(this));
 
-    float cutoff = 0.455f;
-    float cutoff1X = 0.85f;
-    float cutoffI16 = 1.0f;
-    int j;
-    for (j = 0; j < FIRipol_M + 1; j++)
-    {
-        for (int i = 0; i < FIRipol_N; i++)
-        {
-            double t = -double(i) + double(FIRipol_N / 2.0) + double(j) / double(FIRipol_M) - 1.0;
-            double val = (float)(symmetric_blackman(t, FIRipol_N) * cutoff * sincf(cutoff * t));
-            double val1X =
-                (float)(symmetric_blackman(t, FIRipol_N) * cutoff1X * sincf(cutoff1X * t));
-            sinctable[j * FIRipol_N * 2 + i] = (float)val;
-            sinctable1X[j * FIRipol_N + i] = (float)val1X;
-        }
-    }
-    for (j = 0; j < FIRipol_M; j++)
-    {
-        for (int i = 0; i < FIRipol_N; i++)
-        {
-            sinctable[j * FIRipol_N * 2 + FIRipol_N + i] =
-                (float)((sinctable[(j + 1) * FIRipol_N * 2 + i] -
-                         sinctable[j * FIRipol_N * 2 + i]) /
-                        65536.0);
-        }
-    }
-
-    for (j = 0; j < FIRipol_M + 1; j++)
-    {
-        for (int i = 0; i < FIRipolI16_N; i++)
-        {
-            double t =
-                -double(i) + double(FIRipolI16_N / 2.0) + double(j) / double(FIRipol_M) - 1.0;
-            double val =
-                (float)(symmetric_blackman(t, FIRipolI16_N) * cutoffI16 * sincf(cutoffI16 * t));
-
-            sinctableI16[j * FIRipolI16_N + i] = (short)((float)val * 16384.f);
-        }
-    }
+    namespace tabl = sst::basic_blocks::tables;
+    sincTableProvider = std::make_unique<tabl::SurgeSincTableProvider>();
+    static_assert(tabl::SurgeSincTableProvider::FIRipol_M == FIRipol_M);
+    static_assert(tabl::SurgeSincTableProvider::FIRipol_N == FIRipol_N);
+    static_assert(tabl::SurgeSincTableProvider::FIRipolI16_N == FIRipolI16_N);
+    sinctable = sincTableProvider->sinctable;
+    sinctable1X = sincTableProvider->sinctable1X;
+    sinctableI16 = sincTableProvider->sinctableI16;
 
     for (int s = 0; s < n_scenes; s++)
         for (int m = 0; m < n_modsources; ++m)
@@ -173,6 +159,7 @@ SurgeStorage::SurgeStorage(std::string suppliedDataPath) : otherscene_clients(0)
     for (int i = 0; i < n_customcontrollers; i++)
     {
         controllers[i] = 41 + i;
+        controllers_chan[i] = -1;
     }
 
     for (int i = 0; i < n_modsources; i++)
@@ -318,16 +305,41 @@ SurgeStorage::SurgeStorage(std::string suppliedDataPath) : otherscene_clients(0)
     userMidiMappingsPath = userDataPath / "MIDI Mappings";
     userModulatorSettingsPath = userDataPath / "Modulator Presets";
     userSkinsPath = userDataPath / "Skins";
-    createUserDirectory();
+    extraThirdPartyWavetablesPath = config.extraThirdPartyWavetablesPath;
+
+    if (config.createUserDirectory)
+    {
+        createUserDirectory();
+    }
 
     // TIXML requires a newline at end.
+#if HAS_JUCE
     auto cxmlData = std::string(SurgeSharedBinary::configuration_xml,
                                 SurgeSharedBinary::configuration_xmlSize) +
                     "\n";
+#else
+    std::string cxmlData;
+
+    if (fs::exists(datapath / "configuration.xml"))
+    {
+        std::ifstream ifs(datapath / "configuration.xml");
+        std::stringstream buffer;
+        buffer << ifs.rdbuf();
+        cxmlData = buffer.str();
+    }
+    else
+    {
+        cxmlData = std::string(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\" ?><midictrl/>");
+    }
+#endif
     if (!snapshotloader.Parse(cxmlData.c_str()))
     {
+#if HAS_JUCE
+        std::cout << snapshotloader.ErrorDesc() << std::endl;
         reportError("Cannot parse 'configuration.xml' from memory. Internal Software Error.",
                     "Surge Incorrectly Built");
+#endif
     }
 
     load_midi_controllers();
@@ -339,9 +351,7 @@ SurgeStorage::SurgeStorage(std::string suppliedDataPath) : otherscene_clients(0)
         refresh_patchlist();
     }
 
-    getPatch().scene[0].osc[0].wt.dt = 1.0f / 512.f;
-    load_wt(0, &getPatch().scene[0].osc[0].wt, &getPatch().scene[0].osc[0]);
-
+#if HAS_JUCE
     if (!load_wt_wt_mem(SurgeSharedBinary::windows_wt, SurgeSharedBinary::windows_wtSize,
                         &WindowWT))
     {
@@ -351,6 +361,20 @@ SurgeStorage::SurgeStorage(std::string suppliedDataPath) : otherscene_clients(0)
             << "This is a fatal internal software error which should never occur!";
         reportError(oss.str(), "Resource Loading Error");
     }
+#else
+    if (fs::exists(datapath / "windows.wt"))
+    {
+        if (!load_wt_wt(path_to_string(datapath / "windows.wt"), &WindowWT))
+        {
+            WindowWT.size = 0;
+            std::ostringstream oss;
+            oss << "Unable to load 'windows.wt' from file. "
+                << "This is a fatal internal software error which should never occur!";
+            reportError(oss.str(), "Resource Loading Error");
+            _DBGCOUT << oss.str() << std::endl;
+        }
+    }
+#endif
 
     // Tuning library support
     currentScale = Tunings::evenTemperament12NoteScale();
@@ -370,6 +394,7 @@ SurgeStorage::SurgeStorage(std::string suppliedDataPath) : otherscene_clients(0)
     // Load the XML DocStrings if we are loading startup data
     if (loadWtAndPatch)
     {
+#if HAS_JUCE
         auto pdData = std::string(SurgeSharedBinary::paramdocumentation_xml,
                                   SurgeSharedBinary::paramdocumentation_xmlSize) +
                       "\n";
@@ -441,6 +466,7 @@ SurgeStorage::SurgeStorage(std::string suppliedDataPath) : otherscene_clients(0)
                 }
             }
         }
+#endif
     }
 
     for (int s = 0; s < n_scenes; ++s)
@@ -468,6 +494,7 @@ SurgeStorage::SurgeStorage(std::string suppliedDataPath) : otherscene_clients(0)
         getPatch().scene[s].drift.set_extend_range(true);
     }
 
+#ifndef SURGE_SKIP_ODDSOUND_MTS
     bool mtsMode = Surge::Storage::getUserDefaultValue(this, Surge::Storage::UseODDMTS, false);
     if (mtsMode)
     {
@@ -476,8 +503,9 @@ SurgeStorage::SurgeStorage(std::string suppliedDataPath) : otherscene_clients(0)
     else
     {
         oddsound_mts_client = nullptr;
-        oddsound_mts_active = false;
+        oddsound_mts_active_as_client = false;
     }
+#endif
 
     initPatchName =
         Surge::Storage::getUserDefaultValue(this, Surge::Storage::InitialPatchName, "Init Saw");
@@ -513,6 +541,7 @@ void SurgeStorage::createUserDirectory()
                             userSkinsPath, userMidiMappingsPath})
                 fs::create_directories(s);
 
+#if HAS_JUCE
             auto rd = std::string(SurgeSharedBinary::README_UserArea_txt,
                                   SurgeSharedBinary::README_UserArea_txtSize) +
                       "\n";
@@ -520,6 +549,7 @@ void SurgeStorage::createUserDirectory()
             if (of.is_open())
                 of << rd << std::endl;
             of.close();
+#endif
         }
         catch (const fs::filesystem_error &e)
         {
@@ -703,11 +733,13 @@ void SurgeStorage::refresh_patchlist()
 void SurgeStorage::refreshPatchlistAddDir(bool userDir, string subdir)
 {
     refreshPatchOrWTListAddDir(
-        userDir, subdir, [](std::string s) -> bool { return _stricmp(s.c_str(), ".fxp") == 0; },
-        patch_list, patch_category);
+        userDir, userDir ? userDataPath : datapath, subdir,
+        [](std::string s) -> bool { return _stricmp(s.c_str(), ".fxp") == 0; }, patch_list,
+        patch_category);
 }
 
-void SurgeStorage::refreshPatchOrWTListAddDir(bool userDir, string subdir,
+void SurgeStorage::refreshPatchOrWTListAddDir(bool userDir, const fs::path &initialPatchPath,
+                                              string subdir,
                                               std::function<bool(std::string)> filterOp,
                                               std::vector<Patch> &items,
                                               std::vector<PatchCategory> &categories)
@@ -719,7 +751,7 @@ void SurgeStorage::refreshPatchOrWTListAddDir(bool userDir, string subdir,
 
     try
     {
-        fs::path patchpath = userDir ? userDataPath : datapath;
+        fs::path patchpath = initialPatchPath;
         if (!subdir.empty())
             patchpath /= subdir;
 
@@ -891,7 +923,15 @@ void SurgeStorage::refresh_wtlist()
     refresh_wtlistAddDir(false, "wavetables");
 
     firstThirdPartyWTCategory = wt_category.size();
-    refresh_wtlistAddDir(false, "wavetables_3rdparty");
+    if (extraThirdPartyWavetablesPath.empty() ||
+        !fs::is_directory(extraThirdPartyWavetablesPath / "wavetables_3rdparty"))
+    {
+        refresh_wtlistAddDir(false, "wavetables_3rdparty");
+    }
+    else
+    {
+        refresh_wtlistFrom(false, extraThirdPartyWavetablesPath, "wavetables_3rdparty");
+    }
     firstUserWTCategory = wt_category.size();
     refresh_wtlistAddDir(true, "Wavetables");
 
@@ -910,6 +950,38 @@ void SurgeStorage::refresh_wtlist()
         for (auto i = 0; i < n2.length(); ++i)
             if (n2[i] == '\\')
                 n2[i] = '/';
+
+        // OK so now we need to split by path. Sigh.
+        // This is because "EMU VSCO/FOO comes after "EMU" but before "ENU/BAR"
+        auto split = [](const auto &q) {
+            std::vector<std::string> res;
+            size_t p = 0, np = 0;
+            while (np != std::string::npos)
+            {
+                np = q.find("/", p);
+                if (np == std::string::npos)
+                {
+                    res.push_back(q.substr(p));
+                }
+                else
+                {
+                    res.push_back(q.substr(p, np));
+                    p = np + 1;
+                }
+            }
+
+            return res;
+        };
+
+        auto v1 = split(n1);
+        auto v2 = split(n2);
+
+        auto sz = std::min(v1.size(), v2.size());
+        for (int i = 0; i < sz; ++i)
+        {
+            if (v1[i] != v2[i])
+                return strnatcasecmp(v1[i].c_str(), v2[i].c_str()) < 0;
+        }
 
         return strnatcasecmp(n1.c_str(), n2.c_str()) < 0;
     };
@@ -950,14 +1022,19 @@ void SurgeStorage::refresh_wtlist()
         wt_list[wtOrdering[i]].order = i;
 }
 
-void SurgeStorage::refresh_wtlistAddDir(bool userDir, std::string subdir)
+void SurgeStorage::refresh_wtlistAddDir(bool userDir, const std::string &subdir)
+{
+    refresh_wtlistFrom(userDir, userDir ? userDataPath : datapath, subdir);
+}
+
+void SurgeStorage::refresh_wtlistFrom(bool isUser, const fs::path &p, const std::string &subdir)
 {
     std::vector<std::string> supportedTableFileTypes;
     supportedTableFileTypes.push_back(".wt");
     supportedTableFileTypes.push_back(".wav");
 
     refreshPatchOrWTListAddDir(
-        userDir, subdir,
+        isUser, p, subdir,
         [supportedTableFileTypes](std::string in) -> bool {
             for (auto q : supportedTableFileTypes)
             {
@@ -988,8 +1065,7 @@ void SurgeStorage::perform_queued_wtloads()
             }
             else if (patch.scene[sc].osc[o].wt.queue_filename[0])
             {
-                if (!(patch.scene[sc].osc[o].type.val.i == ot_wavetable ||
-                      patch.scene[sc].osc[o].type.val.i == ot_window))
+                if (!(uses_wavetabledata(patch.scene[sc].osc[o].type.val.i)))
                 {
                     patch.scene[sc].osc[o].queue_type = ot_wavetable;
                 }
@@ -1018,60 +1094,82 @@ void SurgeStorage::load_wt(int id, Wavetable *wt, OscillatorStorage *osc)
 {
     wt->current_id = id;
     wt->queue_id = -1;
+
     if (wt_list.empty() && id == 0)
     {
+#if HAS_JUCE
         load_wt_wt_mem(SurgeSharedBinary::memoryWavetable_wt,
                        SurgeSharedBinary::memoryWavetable_wtSize, wt);
+#endif
         if (osc)
-            strncpy(osc->wavetable_display_name, "Sin to Saw", TXT_SIZE);
+        {
+            osc->wavetable_display_name = "Sin to Saw";
+        }
 
         return;
     }
+
     if (id < 0)
+    {
         return;
+    }
+
     if (id >= wt_list.size())
+    {
         return;
+    }
+
     if (!wt)
+    {
         return;
+    }
 
     load_wt(path_to_string(wt_list[id].path), wt, osc);
 
     if (osc)
     {
-        auto n = wt_list.at(id).name;
-        strncpy(osc->wavetable_display_name, n.c_str(), 256);
+        osc->wavetable_display_name = wt_list.at(id).name;
     }
 }
 
 void SurgeStorage::load_wt(string filename, Wavetable *wt, OscillatorStorage *osc)
 {
-    strncpy(wt->current_filename, wt->queue_filename, 256);
-    wt->queue_filename[0] = 0;
-    string extension = filename.substr(filename.find_last_of('.'), filename.npos);
+    wt->current_filename = wt->queue_filename;
+    wt->queue_filename = "";
+
+    std::string extension = filename.substr(filename.find_last_of('.'), filename.npos);
+
     for (unsigned int i = 0; i < extension.length(); i++)
+    {
         extension[i] = tolower(extension[i]);
+    }
+
     bool loaded = false;
+
     if (extension.compare(".wt") == 0)
+    {
         loaded = load_wt_wt(filename, wt);
+    }
     else if (extension.compare(".wav") == 0)
+    {
         loaded = load_wt_wav_portable(filename, wt);
+    }
     else
     {
         std::ostringstream oss;
         oss << "Unable to load file with extension " << extension
-            << "! Surge only supports .wav and .wt wavetable files!";
+            << "! Surge XT only supports .wav and .wt wavetable files!";
         reportError(oss.str(), "Error");
     }
 
     if (osc && loaded)
     {
-        char sep = PATH_SEPARATOR;
-        auto fn = filename.substr(filename.find_last_of(sep) + 1, filename.npos);
+        auto fn = filename.substr(filename.find_last_of(PATH_SEPARATOR) + 1, filename.npos);
         std::string fnnoext = fn.substr(0, fn.find_last_of('.'));
 
         if (fnnoext.length() > 0)
         {
-            strncpy(osc->wavetable_display_name, fnnoext.c_str(), 256);
+            osc->wavetable_display_name = fnnoext;
         }
     }
 }
@@ -1079,9 +1177,14 @@ void SurgeStorage::load_wt(string filename, Wavetable *wt, OscillatorStorage *os
 bool SurgeStorage::load_wt_wt(string filename, Wavetable *wt)
 {
     std::filebuf f;
+
     if (!f.open(string_to_path(filename), std::ios::binary | std::ios::in))
+    {
         return false;
+    }
+
     wt_header wh;
+
     memset(&wh, 0, sizeof(wt_header));
 
     size_t read = f.sgetn(reinterpret_cast<char *>(&wh), sizeof(wh));
@@ -1093,14 +1196,33 @@ bool SurgeStorage::load_wt_wt(string filename, Wavetable *wt)
     }
 
     size_t ds;
-    if (vt_read_int16LE(wh.flags) & wtf_int16)
-        ds = sizeof(short) * vt_read_int16LE(wh.n_tables) * vt_read_int32LE(wh.n_samples);
+
+    if (mech::endian_read_int16LE(wh.flags) & wtf_int16)
+    {
+        ds = sizeof(short) * mech::endian_read_int16LE(wh.n_tables) *
+             mech::endian_read_int32LE(wh.n_samples);
+    }
     else
-        ds = sizeof(float) * vt_read_int16LE(wh.n_tables) * vt_read_int32LE(wh.n_samples);
+    {
+        ds = sizeof(float) * mech::endian_read_int16LE(wh.n_tables) *
+             mech::endian_read_int32LE(wh.n_samples);
+    }
 
     const std::unique_ptr<char[]> data{new char[ds]};
     read = f.sgetn(data.get(), ds);
-    // FIXME - error if read != ds
+
+    if (read != ds)
+    {
+        /* Somehow the file is corrupt. We have a few options
+         * including throw an error here but I think
+         * the best thing to do is just zero pad. In the
+         * factory set, the 'OneShot/Pulse' wavetable
+         * has this problem as a future test case.
+         */
+        auto dpad = data.get() + read;
+        auto drest = ds - read;
+        memset(dpad, 0, drest);
+    }
 
     waveTableDataMutex.lock();
     bool wasBuilt = wt->BuildWT(data.get(), wh, false);
@@ -1116,7 +1238,7 @@ bool SurgeStorage::load_wt_wt(string filename, Wavetable *wt)
             << max_wtable_size << " samples per frame.\n"
             << "In some cases, Surge XT detects this situation inconsistently, which can lead to a "
                "potentially volatile state\n."
-            << "It is recommended to restart Surge and not load "
+            << "It is recommended to restart Surge XT and not load "
                "the problematic wavetable again.\n\n"
             << " If you would like, please attach the wavetable which caused this error to a new "
                "GitHub issue at "
@@ -1141,10 +1263,12 @@ bool SurgeStorage::load_wt_wt_mem(const char *data, size_t dataSize, Wavetable *
     }
 
     size_t ds;
-    if (vt_read_int16LE(wh.flags) & wtf_int16)
-        ds = sizeof(short) * vt_read_int16LE(wh.n_tables) * vt_read_int32LE(wh.n_samples);
+    if (mech::endian_read_int16LE(wh.flags) & wtf_int16)
+        ds = sizeof(short) * mech::endian_read_int16LE(wh.n_tables) *
+             mech::endian_read_int32LE(wh.n_samples);
     else
-        ds = sizeof(float) * vt_read_int16LE(wh.n_tables) * vt_read_int32LE(wh.n_samples);
+        ds = sizeof(float) * mech::endian_read_int16LE(wh.n_tables) *
+             mech::endian_read_int32LE(wh.n_samples);
 
     if (dataSize < ds + sizeof(wt_header))
     {
@@ -1168,7 +1292,7 @@ bool SurgeStorage::load_wt_wt_mem(const char *data, size_t dataSize, Wavetable *
             << max_wtable_size << " samples per frame.\n"
             << "In some cases, Surge XT detects this situation inconsistently, which can lead to a "
                "potentially volatile state\n."
-            << "It is recommended to restart Surge and not load "
+            << "It is recommended to restart Surge XT and not load "
                "the problematic wavetable again.\n\n"
             << " If you would like, please attach the wavetable which caused this error to a new "
                "GitHub issue at "
@@ -1198,7 +1322,7 @@ bool SurgeStorage::getOverrideDataHome(std::string &v)
 
 int SurgeStorage::get_clipboard_type() const { return clipboard_type; }
 
-int SurgeStorage::getAdjacentWaveTable(int id, bool nextPrev) const
+int SurgeStorage::getAdjacentWaveTable(int id, bool direction) const
 {
     int n = wt_list.size();
     if (!n)
@@ -1213,7 +1337,7 @@ int SurgeStorage::getAdjacentWaveTable(int id, bool nextPrev) const
     {
         int order = wt_list[id].order;
 
-        if (nextPrev)
+        if (direction)
             order = (order >= (n - 1)) ? 0 : order + 1; // see comment in jogPatch for that >= vs ==
         else
             order = (order <= 0) ? n - 1 : order - 1;
@@ -1246,12 +1370,10 @@ void SurgeStorage::clipboard_copy(int type, int scene, int entry, modsources ms)
         if (uses_wavetabledata(getPatch().scene[scene].osc[entry].type.val.i))
         {
             clipboard_wt[0].Copy(&getPatch().scene[scene].osc[entry].wt);
-            strncpy(clipboard_wt_names[0],
-                    getPatch().scene[scene].osc[entry].wavetable_display_name, 256);
+            clipboard_wt_names[0] = getPatch().scene[scene].osc[entry].wavetable_display_name;
         }
 
-        memcpy(&clipboard_extraconfig[0], &getPatch().scene[scene].osc[entry].extraConfig,
-               sizeof(OscillatorStorage::ExtraConfigurationData));
+        clipboard_extraconfig[0] = getPatch().scene[scene].osc[entry].extraConfig;
     }
 
     if (type & cp_lfo)
@@ -1262,8 +1384,7 @@ void SurgeStorage::clipboard_copy(int type, int scene, int entry, modsources ms)
 
         if (getPatch().scene[scene].lfo[entry].shape.val.i == lt_stepseq)
         {
-            memcpy(&clipboard_stepsequences[0], &getPatch().stepsequences[scene][entry],
-                   sizeof(StepSequencerStorage));
+            clipboard_stepsequences[0] = getPatch().stepsequences[scene][entry];
         }
 
         if (getPatch().scene[scene].lfo[entry].shape.val.i == lt_mseg)
@@ -1291,8 +1412,7 @@ void SurgeStorage::clipboard_copy(int type, int scene, int entry, modsources ms)
 
         for (int i = 0; i < n_lfos; i++)
         {
-            memcpy(&clipboard_stepsequences[i], &getPatch().stepsequences[scene][i],
-                   sizeof(StepSequencerStorage));
+            clipboard_stepsequences[i] = getPatch().stepsequences[scene][i];
             clipboard_msegs[i] = getPatch().msegs[scene][i];
             clipboard_formulae[i] = getPatch().formulamods[scene][i];
 
@@ -1306,10 +1426,8 @@ void SurgeStorage::clipboard_copy(int type, int scene, int entry, modsources ms)
         for (int i = 0; i < n_oscs; i++)
         {
             clipboard_wt[i].Copy(&getPatch().scene[scene].osc[i].wt);
-            strncpy(clipboard_wt_names[i], getPatch().scene[scene].osc[i].wavetable_display_name,
-                    256);
-            memcpy(&clipboard_extraconfig[i], &getPatch().scene[scene].osc[i].extraConfig,
-                   sizeof(OscillatorStorage::ExtraConfigurationData));
+            clipboard_wt_names[i] = getPatch().scene[scene].osc[i].wavetable_display_name;
+            clipboard_extraconfig[i] = getPatch().scene[scene].osc[i].extraConfig;
         }
 
         clipboard_primode = getPatch().scene[scene].monoVoicePriorityMode;
@@ -1473,8 +1591,7 @@ void SurgeStorage::clipboard_paste(int type, int scene, int entry, modsources ms
         start = 1;
         getPatch().update_controls(false, &getPatch().scene[scene].osc[entry]);
 
-        memcpy(&getPatch().scene[scene].osc[entry].extraConfig, &clipboard_extraconfig[0],
-               sizeof(OscillatorStorage::ExtraConfigurationData));
+        getPatch().scene[scene].osc[entry].extraConfig = clipboard_extraconfig[0];
     }
 
     if (type & cp_lfo)
@@ -1490,8 +1607,7 @@ void SurgeStorage::clipboard_paste(int type, int scene, int entry, modsources ms
 
         for (int i = 0; i < n_lfos; i++)
         {
-            memcpy(&getPatch().stepsequences[scene][i], &clipboard_stepsequences[i],
-                   sizeof(StepSequencerStorage));
+            getPatch().stepsequences[scene][i] = clipboard_stepsequences[i];
             getPatch().msegs[scene][i] = clipboard_msegs[i];
             getPatch().formulamods[scene][i] = clipboard_formulae[i];
 
@@ -1504,11 +1620,9 @@ void SurgeStorage::clipboard_paste(int type, int scene, int entry, modsources ms
 
         for (int i = 0; i < n_oscs; i++)
         {
-            memcpy(&getPatch().scene[scene].osc[i].extraConfig, &clipboard_extraconfig[i],
-                   sizeof(OscillatorStorage::ExtraConfigurationData));
+            getPatch().scene[scene].osc[i].extraConfig = clipboard_extraconfig[i];
             getPatch().scene[scene].osc[i].wt.Copy(&clipboard_wt[i]);
-            strncpy(getPatch().scene[scene].osc[i].wavetable_display_name, clipboard_wt_names[i],
-                    256);
+            getPatch().scene[scene].osc[i].wavetable_display_name = clipboard_wt_names[i];
         }
 
         getPatch().scene[scene].monoVoicePriorityMode = clipboard_primode;
@@ -1548,11 +1662,33 @@ void SurgeStorage::clipboard_paste(int type, int scene, int entry, modsources ms
             getPatch().param_ptr[pid]->temposync = p.temposync;
             getPatch().param_ptr[pid]->set_extend_range(p.extend_range);
             getPatch().param_ptr[pid]->deactivated = p.deactivated;
+            getPatch().param_ptr[pid]->absolute = p.absolute;
             getPatch().param_ptr[pid]->porta_constrate = p.porta_constrate;
             getPatch().param_ptr[pid]->porta_gliss = p.porta_gliss;
             getPatch().param_ptr[pid]->porta_retrigger = p.porta_retrigger;
             getPatch().param_ptr[pid]->porta_curve = p.porta_curve;
             getPatch().param_ptr[pid]->deform_type = p.deform_type;
+
+            /*
+             * This is a really nasty special case that the bool relative switch
+             * modifies the cross-param *type* of the filter cutoff when it is setvalue01ed
+             * This is a gross workaround for the bug in #6475 which I will ponder after pushing.
+             */
+            if (pid == getPatch().scene[scene].f2_cutoff_is_offset.id)
+            {
+                auto down = p.val.b;
+                if (down)
+                {
+                    getPatch().scene[scene].filterunit[1].cutoff.set_type(ct_freq_mod);
+                    getPatch().scene[scene].filterunit[1].cutoff.set_name("Offset");
+                }
+                else
+                {
+                    getPatch().scene[scene].filterunit[1].cutoff.set_type(
+                        ct_freq_audible_with_tunability);
+                    getPatch().scene[scene].filterunit[1].cutoff.set_name("Cutoff");
+                }
+            }
         }
 
         if (type & cp_osc)
@@ -1560,8 +1696,7 @@ void SurgeStorage::clipboard_paste(int type, int scene, int entry, modsources ms
             if (uses_wavetabledata(getPatch().scene[scene].osc[entry].type.val.i))
             {
                 getPatch().scene[scene].osc[entry].wt.Copy(&clipboard_wt[0]);
-                strncpy(getPatch().scene[scene].osc[entry].wavetable_display_name,
-                        clipboard_wt_names[0], 256);
+                getPatch().scene[scene].osc[entry].wavetable_display_name = clipboard_wt_names[0];
             }
 
             // copy modroutings
@@ -1596,8 +1731,7 @@ void SurgeStorage::clipboard_paste(int type, int scene, int entry, modsources ms
         {
             if (getPatch().scene[scene].lfo[entry].shape.val.i == lt_stepseq)
             {
-                memcpy(&getPatch().stepsequences[scene][entry], &clipboard_stepsequences[0],
-                       sizeof(StepSequencerStorage));
+                getPatch().stepsequences[scene][entry] = clipboard_stepsequences[0];
             }
 
             if (getPatch().scene[scene].lfo[entry].shape.val.i == lt_mseg)
@@ -1702,6 +1836,7 @@ void SurgeStorage::clipboard_paste(int type, int scene, int entry, modsources ms
                 ModulationRouting m;
                 m.source_id = clipboard_modulation_voice[i].source_id;
                 m.source_index = clipboard_modulation_voice[i].source_index;
+                m.source_scene = scene; /* clipboard_modulation_global[i].source_scene; */
                 m.depth = clipboard_modulation_voice[i].depth;
                 m.destination_id = clipboard_modulation_voice[i].destination_id;
                 pushBackOrOverride(getPatch().scene[scene].modulation_voice, m);
@@ -1713,6 +1848,7 @@ void SurgeStorage::clipboard_paste(int type, int scene, int entry, modsources ms
                 ModulationRouting m;
                 m.source_id = clipboard_modulation_scene[i].source_id;
                 m.source_index = clipboard_modulation_scene[i].source_index;
+                m.source_scene = scene; /* clipboard_modulation_global[i].source_scene; */
                 m.depth = clipboard_modulation_scene[i].depth;
                 m.destination_id = clipboard_modulation_scene[i].destination_id;
                 pushBackOrOverride(getPatch().scene[scene].modulation_scene, m);
@@ -1744,8 +1880,8 @@ void SurgeStorage::write_midi_controllers_to_user_default()
     TiXmlElement root("midiconfig");
     TiXmlElement mc("midictrl");
 
-    int n = n_global_params + n_scene_params; // only store midictrl's for scene A (scene A -> scene
-                                              // B will be duplicated on load)
+    int n = n_global_params + (n_scene_params * n_scenes);
+
     for (int i = 0; i < n; i++)
     {
         if (getPatch().param_ptr[i]->midictrl >= 0)
@@ -1753,9 +1889,11 @@ void SurgeStorage::write_midi_controllers_to_user_default()
             TiXmlElement mc_e("entry");
             mc_e.SetAttribute("p", i);
             mc_e.SetAttribute("ctrl", getPatch().param_ptr[i]->midictrl);
+            mc_e.SetAttribute("chan", getPatch().param_ptr[i]->midichan);
             mc.InsertEndChild(mc_e);
         }
     }
+
     root.InsertEndChild(mc);
 
     TiXmlElement cc("customctrl");
@@ -1765,8 +1903,10 @@ void SurgeStorage::write_midi_controllers_to_user_default()
         TiXmlElement cc_e("entry");
         cc_e.SetAttribute("p", i);
         cc_e.SetAttribute("ctrl", controllers[i]);
+        cc_e.SetAttribute("chan", controllers_chan[i]);
         cc.InsertEndChild(cc_e);
     }
+
     root.InsertEndChild(cc);
     doc.InsertEndChild(root);
 
@@ -1780,7 +1920,6 @@ void SurgeStorage::write_midi_controllers_to_user_default()
     {
         // Oh well.
     }
-    // save_snapshots();
 }
 
 void SurgeStorage::setSamplerate(float sr)
@@ -1809,6 +1948,7 @@ void SurgeStorage::load_midi_controllers()
     auto mcp = userDataPath / "SurgeMIDIDefaults.xml";
     TiXmlDocument mcd;
     TiXmlElement *midiRoot = nullptr;
+
     if (mcd.LoadFile(mcp))
     {
         midiRoot = mcd.FirstChildElement("midiconfig");
@@ -1818,9 +1958,13 @@ void SurgeStorage::load_midi_controllers()
         if (midiRoot)
         {
             auto q = TINYXML_SAFE_TO_ELEMENT(midiRoot->FirstChild(n));
+
             if (q)
+            {
                 return q;
+            }
         }
+
         return getSnapshotSection(n);
     };
 
@@ -1828,16 +1972,34 @@ void SurgeStorage::load_midi_controllers()
     assert(mc);
 
     TiXmlElement *entry = TINYXML_SAFE_TO_ELEMENT(mc->FirstChild("entry"));
+
     while (entry)
     {
-        int id, ctrl;
-        if ((entry->QueryIntAttribute("p", &id) == TIXML_SUCCESS) &&
-            (entry->QueryIntAttribute("ctrl", &ctrl) == TIXML_SUCCESS))
+        int id, ctrl, chan;
+
+        if (entry->QueryIntAttribute("p", &id) == TIXML_SUCCESS)
         {
-            getPatch().param_ptr[id]->midictrl = ctrl;
-            if (id >= n_global_params)
-                getPatch().param_ptr[id + n_scene_params]->midictrl = ctrl;
+            if (entry->QueryIntAttribute("ctrl", &ctrl) == TIXML_SUCCESS)
+            {
+                getPatch().param_ptr[id]->midictrl = ctrl;
+            }
+
+            if (entry->QueryIntAttribute("chan", &chan) == TIXML_SUCCESS)
+            {
+                getPatch().param_ptr[id]->midichan = chan;
+            }
+            else
+            {
+                getPatch().param_ptr[id]->midichan = -1;
+
+                // care for old MIDI config files - duplicate scene A assignment to scene B
+                if (id >= n_global_params && id < (n_global_params + n_scene_params))
+                {
+                    getPatch().param_ptr[id + n_scene_params]->midictrl = ctrl;
+                }
+            }
         }
+
         entry = TINYXML_SAFE_TO_ELEMENT(entry->NextSibling("entry"));
     }
 
@@ -1845,20 +2007,43 @@ void SurgeStorage::load_midi_controllers()
     assert(cc);
 
     entry = TINYXML_SAFE_TO_ELEMENT(cc->FirstChild("entry"));
+
     while (entry)
     {
-        int id, ctrl;
-        if ((entry->QueryIntAttribute("p", &id) == TIXML_SUCCESS) &&
-            (entry->QueryIntAttribute("ctrl", &ctrl) == TIXML_SUCCESS) &&
-            (id < n_customcontrollers))
+        int id, ctrl, chan;
+
+        if (entry->QueryIntAttribute("p", &id) == TIXML_SUCCESS)
         {
-            controllers[id] = ctrl;
+            if (entry->QueryIntAttribute("ctrl", &ctrl) == TIXML_SUCCESS &&
+                id < n_customcontrollers)
+            {
+                controllers[id] = ctrl;
+            }
+
+            if (entry->QueryIntAttribute("chan", &chan) == TIXML_SUCCESS &&
+                id < n_customcontrollers)
+            {
+                controllers_chan[id] = chan;
+            }
+            else
+            {
+                controllers_chan[id] = -1;
+            }
         }
+
         entry = TINYXML_SAFE_TO_ELEMENT(entry->NextSibling("entry"));
     }
 }
 
-SurgeStorage::~SurgeStorage() { deinitialize_oddsound(); }
+SurgeStorage::~SurgeStorage()
+{
+#ifndef SURGE_SKIP_ODDSOUND_MTS
+    if (oddsound_mts_active_as_main)
+        disconnect_as_oddsound_main();
+
+    deinitialize_oddsound();
+#endif
+}
 
 double shafted_tanh(double x) { return (exp(x) - exp(-x * 1.2)) / (exp(x) + exp(-x)); }
 
@@ -1907,6 +2092,8 @@ void SurgeStorage::init_tables()
     // ballistics at any sample rate!
     // We have also decided to make the meters less sluggish, so we increased the cutoff to 60 Hz
     vu_falloff = exp(-2 * M_PI * (60.f * samplerate_inv));
+
+    cpu_falloff = exp(-2 * M_PI * (60.f * samplerate_inv));
 }
 
 float SurgeStorage::note_to_pitch(float x)
@@ -2120,7 +2307,38 @@ bool SurgeStorage::resetToCurrentScaleAndMapping()
         table_note_omega[1][i] =
             (float)cos(2 * M_PI * min(0.5, 440 * table_pitch[i] * dsamplerate_os_inv));
     }
+    tuningUpdates++;
     return true;
+}
+
+void SurgeStorage::loadTuningFromSCL(const fs::path &p)
+{
+    try
+    {
+        retuneToScale(Tunings::readSCLFile(p.u8string()));
+    }
+    catch (Tunings::TuningError &e)
+    {
+        retuneTo12TETScaleC261Mapping();
+        reportError(e.what(), "SCL Error");
+    }
+    if (onTuningChanged)
+        onTuningChanged();
+}
+
+void SurgeStorage::loadMappingFromKBM(const fs::path &p)
+{
+    try
+    {
+        remapToKeyboard(Tunings::readKBMFile(p.u8string()));
+    }
+    catch (Tunings::TuningError &e)
+    {
+        remapToConcertCKeyboard();
+        reportError(e.what(), "KBM Error");
+    }
+    if (onTuningChanged)
+        onTuningChanged();
 }
 
 void SurgeStorage::setTuningApplicationMode(const TuningApplicationMode m)
@@ -2128,7 +2346,7 @@ void SurgeStorage::setTuningApplicationMode(const TuningApplicationMode m)
     tuningApplicationMode = m;
     patchStoredTuningApplicationMode = m;
     resetToCurrentScaleAndMapping();
-    if (oddsound_mts_active)
+    if (oddsound_mts_active_as_client)
     {
         tuningApplicationMode = RETUNE_MIDI_ONLY;
     }
@@ -2179,7 +2397,7 @@ void SurgeStorage::loadMidiMappingByName(std::string name)
     auto doc = userMidiMappingsXMLByName[name];
     auto sm = TINYXML_SAFE_TO_ELEMENT(doc.FirstChild("surge-midi"));
 
-    // We can do revision stuff here later if we need to
+    // we can do revision stuff here later if we need to
     if (!sm)
     {
         // Invalid XML Document. Show an error?
@@ -2203,32 +2421,60 @@ void SurgeStorage::loadMidiMappingByName(std::string name)
 
         while (map)
         {
-            int i, c;
-            if (map->QueryIntAttribute("p", &i) == TIXML_SUCCESS &&
-                map->QueryIntAttribute("cc", &c) == TIXML_SUCCESS)
+            int i, c, ch;
+
+            if (map->QueryIntAttribute("p", &i) == TIXML_SUCCESS)
             {
-                getPatch().param_ptr[i]->midictrl = c;
-                if (i >= n_global_params)
+                if (map->QueryIntAttribute("cc", &c) == TIXML_SUCCESS)
                 {
-                    getPatch().param_ptr[i + n_scene_params]->midictrl = c;
+                    getPatch().param_ptr[i]->midictrl = c;
+                }
+
+                if (map->QueryIntAttribute("chan", &ch) == TIXML_SUCCESS)
+                {
+                    getPatch().param_ptr[i]->midichan = ch;
+                }
+                else
+                {
+                    // care for old MIDI config files - duplicate scene A assignment to scene B
+                    if (i >= n_global_params && i < (n_global_params + n_scene_params))
+                    {
+                        getPatch().param_ptr[i + n_scene_params]->midictrl = c;
+                    }
                 }
             }
+
             map = map->NextSiblingElement("map");
         }
     }
 
     auto cc = TINYXML_SAFE_TO_ELEMENT(sm->FirstChild("customctrl"));
+
     if (cc)
     {
         auto ctrl = cc->FirstChildElement("ctrl");
+
         while (ctrl)
         {
-            int i, cc;
-            if (ctrl->QueryIntAttribute("i", &i) == TIXML_SUCCESS &&
-                ctrl->QueryIntAttribute("cc", &cc) == TIXML_SUCCESS)
+            int i, cc, ch;
+
+            if (ctrl->QueryIntAttribute("i", &i) == TIXML_SUCCESS)
             {
-                controllers[i] = cc;
+                if (ctrl->QueryIntAttribute("cc", &cc) == TIXML_SUCCESS)
+                {
+                    controllers[i] = cc;
+                }
+
+                if (ctrl->QueryIntAttribute("chan", &ch) == TIXML_SUCCESS)
+                {
+                    controllers_chan[i] = ch;
+                }
+                else
+                {
+                    controllers_chan[i] = -1;
+                }
             }
+
             ctrl = ctrl->NextSiblingElement("ctrl");
         }
     }
@@ -2243,10 +2489,10 @@ void SurgeStorage::storeMidiMappingToName(std::string name)
 
     // Build the XML here
 
-    // only store midictrl's for scene A (scene A -> scene B will be duplicated on load)
-    int n = n_global_params + n_scene_params;
+    int n = n_global_params + (n_scene_params * n_scenes);
 
     TiXmlElement mc("midictrl");
+
     for (int i = 0; i < n; i++)
     {
         if (getPatch().param_ptr[i]->midictrl >= 0)
@@ -2254,19 +2500,24 @@ void SurgeStorage::storeMidiMappingToName(std::string name)
             TiXmlElement p("map");
             p.SetAttribute("p", i);
             p.SetAttribute("cc", getPatch().param_ptr[i]->midictrl);
+            p.SetAttribute("chan", getPatch().param_ptr[i]->midichan);
             mc.InsertEndChild(p);
         }
     }
+
     sm.InsertEndChild(mc);
 
     TiXmlElement cc("customctrl");
+
     for (int i = 0; i < n_customcontrollers; ++i)
     {
         TiXmlElement p("ctrl");
         p.SetAttribute("i", i);
         p.SetAttribute("cc", controllers[i]);
+        p.SetAttribute("chan", controllers_chan[i]);
         cc.InsertEndChild(p);
     }
+
     sm.InsertEndChild(cc);
 
     doc.InsertEndChild(sm);
@@ -2282,6 +2533,7 @@ void SurgeStorage::storeMidiMappingToName(std::string name)
     }
 }
 
+#ifndef SURGE_SKIP_ODDSOUND_MTS
 void SurgeStorage::initialize_oddsound()
 {
     if (oddsound_mts_client)
@@ -2307,8 +2559,8 @@ void SurgeStorage::deinitialize_oddsound()
 
 void SurgeStorage::setOddsoundMTSActiveTo(bool b)
 {
-    bool poa = oddsound_mts_active;
-    oddsound_mts_active = b;
+    bool poa = oddsound_mts_active_as_client;
+    oddsound_mts_active_as_client = b;
     if (b && b != poa)
     {
         // Oddsound right now is MIDI_ONLY so force that to avoid lingering problems
@@ -2319,6 +2571,61 @@ void SurgeStorage::setOddsoundMTSActiveTo(bool b)
         tuningApplicationMode = patchStoredTuningApplicationMode;
     }
 }
+
+void SurgeStorage::connect_as_oddsound_main()
+{
+    if (oddsound_mts_client)
+    {
+        deinitialize_oddsound();
+    }
+    if (oddsound_mts_active_as_main)
+    // should never happen. This is different from can-register;
+    // this is "I am registered as the main"
+    {
+        MTS_DeregisterMaster();
+        oddsound_mts_active_as_main = false;
+    }
+
+    // so now if there is a main it isn't me so check if I can register
+    if (MTS_CanRegisterMaster())
+    {
+        oddsound_mts_active_as_main = true;
+        MTS_RegisterMaster();
+    }
+    else
+    {
+        reportError("Another software program is registered as an MTS-ESP source. "
+                    "As such, this session cannot become a source and that other program "
+                    "will provide tuning information to this setting. If you want to "
+                    "reset the MTS-ESP system, use the 'Reinitialize MTS-ESP' option in Surge XT. "
+                    "Alternatively, quit the other program and attempt re-enabling Act as MTS-ESP "
+                    "source option.",
+                    "MTS-ESP Source Initialization Error");
+    }
+    lastSentTuningUpdate = -1;
+}
+void SurgeStorage::disconnect_as_oddsound_main()
+{
+    oddsound_mts_active_as_main = false;
+    MTS_DeregisterMaster();
+    initialize_oddsound();
+}
+void SurgeStorage::send_tuning_update()
+{
+    if (lastSentTuningUpdate == tuningUpdates)
+        return;
+
+    lastSentTuningUpdate = tuningUpdates;
+    if (!oddsound_mts_active_as_main)
+        return;
+
+    for (int i = 0; i < 128; ++i)
+    {
+        MTS_SetNoteTuning(currentTuning.frequencyForMidiNote(i), i);
+    }
+    MTS_SetScaleName(currentTuning.scale.description.c_str());
+}
+#endif
 
 void SurgeStorage::toggleTuningToCache()
 {
@@ -2360,17 +2667,21 @@ bool SurgeStorage::isStandardTuningAndHasNoToggle()
 
 void SurgeStorage::resetTuningToggle() { isToggledToCache = false; }
 
-void SurgeStorage::reportError(const std::string &msg, const std::string &title)
+void SurgeStorage::reportError(const std::string &msg, const std::string &title,
+                               const ErrorType errorType, bool reportToStdout)
 {
-    std::cout << "Surge Error [" << title << "]\n" << msg << std::endl;
+    if (reportToStdout)
+    {
+        std::cout << "Surge Error [" << title << "]\n" << msg << std::endl;
+    }
     if (errorListeners.empty())
     {
         std::lock_guard<std::mutex> g(preListenerErrorMutex);
-        preListenerErrors.emplace_back(msg, title);
+        preListenerErrors.emplace_back(msg, title, errorType);
     }
 
     for (auto l : errorListeners)
-        l->onSurgeError(msg, title);
+        l->onSurgeError(msg, title, errorType);
 }
 
 float SurgeStorage::remapKeyInMidiOnlyMode(float res)
@@ -2385,8 +2696,6 @@ float SurgeStorage::remapKeyInMidiOnlyMode(float res)
     }
     return res;
 }
-
-const double SurgeStorage::MIDI_0_FREQ = Tunings::MIDI_0_FREQ;
 
 namespace Surge
 {
@@ -2514,6 +2823,38 @@ string findReplaceSubstring(string &source, const string &from, const string &to
     source.swap(newString);
 
     return newString;
+}
+
+Surge::Storage::ScenesOutputData::ScenesOutputData()
+{
+    for (int i = 0; i < n_scenes; i++)
+    {
+        for (int j = 0; j < N_OUTPUTS; j++)
+        {
+            std::shared_ptr<float[BLOCK_SIZE]> block{new float[BLOCK_SIZE]{}};
+            sceneData[i][j] = block;
+        }
+    }
+}
+const std::shared_ptr<float[BLOCK_SIZE]> &
+Surge::Storage::ScenesOutputData::getSceneData(int scene, int channel) const
+{
+    assert(scene < n_scenes && scene >= 0);
+    assert(channel < N_OUTPUTS && channel >= 0);
+    return sceneData[scene][channel];
+}
+bool Surge::Storage::ScenesOutputData::thereAreClients(int scene) const
+{
+    return std::any_of(std::begin(sceneData[scene]), std::end(sceneData[scene]),
+                       [](const auto &channel) { return channel.use_count() > 1; });
+}
+void Surge::Storage::ScenesOutputData::provideSceneData(int scene, int channel, float *data)
+{
+    if (scene < n_scenes && scene >= 0 && channel < N_OUTPUTS && channel >= 0 &&
+        sceneData[scene][channel].use_count() > 1) // we don't provide data if there are no clients
+    {
+        memcpy(sceneData[scene][channel].get(), data, BLOCK_SIZE * sizeof(float));
+    }
 }
 
 } // namespace Storage

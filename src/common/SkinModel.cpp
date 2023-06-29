@@ -1,17 +1,24 @@
 /*
-** Surge Synthesizer is Free and Open Source Software
-**
-** Surge is made available under the Gnu General Public License, v3.0
-** https://www.gnu.org/licenses/gpl-3.0.en.html
-**
-** Copyright 2004-2020 by various individuals as described by the Git transaction log
-**
-** All source at: https://github.com/surge-synthesizer/surge.git
-**
-** Surge was a commercial product from 2004-2018, with Copyright and ownership
-** in that period held by Claes Johanson at Vember Audio. Claes made Surge
-** open source in September 2018.
-*/
+ * Surge XT - a free and open source hybrid synthesizer,
+ * built by Surge Synth Team
+ *
+ * Learn more at https://surge-synthesizer.github.io/
+ *
+ * Copyright 2018-2023, various authors, as described in the GitHub
+ * transaction log.
+ *
+ * Surge XT is released under the GNU General Public Licence v3
+ * or later (GPL-3.0-or-later). The license is found in the "LICENSE"
+ * file in the root of this repository, or at
+ * https://www.gnu.org/licenses/gpl-3.0.en.html
+ *
+ * Surge was a commercial product from 2004-2018, copyright and ownership
+ * held by Claes Johanson at Vember Audio during that period.
+ * Claes made Surge open source in September 2018.
+ *
+ * All source for Surge XT is available at
+ * https://github.com/surge-synthesizer/surge
+ */
 
 #include "SkinModel.h"
 #include "resource.h"
@@ -51,7 +58,7 @@ Component MultiSwitch =
                       {"Is the switch draggable as a slider via mouse/touch or not. Valid values: "
                        "true, false"})
         .withProperty(Component::ACCESSIBLE_AS_MOMENTARY_BUTTON, {"accessible_as_buttons"},
-                      {"Is the accesible display buttons (true) or radio buttons (false, def)"})
+                      {"Is the accessible display buttons (true) or radio buttons (false, def)"})
         .withProperty(Component::HOVER_IMAGE, {"hover_image"},
                       {"Hover image of the switch - required if you "
                        "set the base image and want feedback on mouse hover"})
@@ -91,7 +98,7 @@ Component Switch =
         .withProperty(Component::BACKGROUND, {"image", "bg_resource", "bg_id"},
                       {"Base image of the switch"})
         .withProperty(Component::ACCESSIBLE_AS_MOMENTARY_BUTTON, {"accessible_as_buttons"},
-                      {"Is the accesible display buttons (true) or radio buttons (false, def)"});
+                      {"Is the accessible display buttons (true) or radio buttons (false, def)"});
 
 Component FilterSelector =
     Component("FilterSelector")
@@ -158,7 +165,7 @@ Component Label =
     Component("Internal Label")
         .withProperty(Component::TEXT, {"text"}, {"Arbitrary text to be displayed on the label."})
         .withProperty(Component::CONTROL_TEXT, {"control_text"},
-                      {"Text tied to a particular Surge parameter. Use skin component connector "
+                      {"Text tied to a particular Surge XT parameter. Use skin component connector "
                        "name as a value. Overrules arbitrary text set with 'text' property"})
         .withProperty(Component::TEXT_ALIGN, {"text_align"}, {"Valid values: left, center, right"})
         .withProperty(Component::FONT_SIZE, {"font_size"}, {"Font size in points, integer only"})
@@ -176,7 +183,7 @@ Component Label =
                       {"Resource name of the image to be displayed by the label. Overrides "
                        "background and frame/border colors"});
 
-// ToDo - obvioulsy expand properties
+// ToDo - obviously expand properties
 Component WaveShaperSelector = Component("WaveShaperSelector");
 
 } // namespace Components
@@ -600,10 +607,13 @@ Connector mod_list =
 Connector filter_analysis = Connector("filter.filter_analysis.window", 300, 263, 450, 212,
                                       Components::Custom, Connector::FILTER_ANALYSIS_WINDOW);
 
+Connector oscilloscope = Connector("oscilloscope.window", 0, 58, 750, 365, Components::Custom,
+                                   Connector::OSCILLOSCOPE_WINDOW);
+
 Connector ws_analysis = Connector("filter.waveshaper_analysis.window", 450, 237, 300, 160,
                                   Components::Custom, Connector::WAVESHAPER_ANALYSIS_WINDOW);
 
-Connector save_patch_dialog = Connector("controls.patch.save.window", 157, 57, 390, 270,
+Connector save_patch_dialog = Connector("controls.patch.save.window", 157, 57, 390, 300,
                                         Components::Custom, Connector::SAVE_PATCH_DIALOG);
 
 // modulation panel is special, so it shows up as 'CUSTOM' with no connector and is special-cased in

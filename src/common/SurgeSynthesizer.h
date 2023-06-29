@@ -1,24 +1,33 @@
 /*
-** Surge Synthesizer is Free and Open Source Software
-**
-** Surge is made available under the Gnu General Public License, v3.0
-** https://www.gnu.org/licenses/gpl-3.0.en.html
-**
-** Copyright 2004-2020 by various individuals as described by the Git transaction log
-**
-** All source at: https://github.com/surge-synthesizer/surge.git
-**
-** Surge was a commercial product from 2004-2018, with Copyright and ownership
-** in that period held by Claes Johanson at Vember Audio. Claes made Surge
-** open source in September 2018.
-*/
+ * Surge XT - a free and open source hybrid synthesizer,
+ * built by Surge Synth Team
+ *
+ * Learn more at https://surge-synthesizer.github.io/
+ *
+ * Copyright 2018-2023, various authors, as described in the GitHub
+ * transaction log.
+ *
+ * Surge XT is released under the GNU General Public Licence v3
+ * or later (GPL-3.0-or-later). The license is found in the "LICENSE"
+ * file in the root of this repository, or at
+ * https://www.gnu.org/licenses/gpl-3.0.en.html
+ *
+ * Surge was a commercial product from 2004-2018, copyright and ownership
+ * held by Claes Johanson at Vember Audio during that period.
+ * Claes made Surge open source in September 2018.
+ *
+ * All source for Surge XT is available at
+ * https://github.com/surge-synthesizer/surge
+ */
 
-#pragma once
+#ifndef SURGE_SRC_COMMON_SURGESYNTHESIZER_H
+#define SURGE_SRC_COMMON_SURGESYNTHESIZER_H
 #include "SurgeStorage.h"
 #include "SurgeVoice.h"
 #include "Effect.h"
 #include "BiquadFilter.h"
 #include <set>
+#include <sst/filters/HalfRateFilter.h>
 
 struct QuadFilterChainState;
 
@@ -26,6 +35,8 @@ struct QuadFilterChainState;
 #include <utility>
 #include <atomic>
 #include <cstdio>
+#include <bitset>
+#include <vector>
 
 struct timedata
 {
@@ -57,6 +68,7 @@ class alignas(16) SurgeSynthesizer
         send alignas(16)[n_send_slots][n_scenes];
 
     std::atomic<bool> audio_processing_active;
+    std::atomic<bool> patchChanged{false};
 
     // methods
   public:
@@ -68,10 +80,15 @@ class alignas(16) SurgeSynthesizer
     };
     SurgeSynthesizer(PluginLayer *parent, const std::string &suppliedDataPath = "");
     virtual ~SurgeSynthesizer();
+
+    // Also see setNoteExpression() which allows you to control all note parameters polyphonically
+    // with the user-provided host_noteid parameter.
     void playNote(char channel, char key, char velocity, char detune, int32_t host_noteid = -1);
     void releaseNote(char channel, char key, char velocity, int32_t host_noteid = -1);
+    void chokeNote(int16_t channel, int16_t key, char velocity, int32_t host_noteid = -1);
     void releaseNotePostHoldCheck(int scene, char channel, char key, char velocity,
                                   int32_t host_noteid = -1);
+    void resetPitchBend(int8_t channel);
     void pitchBend(char channel, int value);
     void polyAftertouch(char channel, int key, int value);
     void channelAftertouch(char channel, int value);
@@ -99,7 +116,7 @@ class alignas(16) SurgeSynthesizer
      * processAudioThreadOpsWhenAudioEngineUnavailable reloads a patch if the audio thread
      * isn't running but if it is running lets the deferred queue handle it. But it has an option
      * which is *extremely dangerous* to force you to load in the current thread immediately.
-     * If you use this option and dont' know what you are doing it will explode - basically
+     * If you use this option and don't know what you are doing it will explode - basically
      * we only use it in the startup constructor path.
      */
     void
@@ -137,6 +154,9 @@ class alignas(16) SurgeSynthesizer
 
     SurgeVoice *getUnusedVoice(int scene); // not const since it updates voice state
     void freeVoice(SurgeVoice *);
+    void reclaimVoiceFor(SurgeVoice *v, char key, char channel, char velocity, int scene,
+                         int host_note_id, int host_originating_channel, int host_originating_key,
+                         bool envFromZero = false);
     void notifyEndedNote(int32_t nid, int16_t key, int16_t chan, bool thisBlock = true);
     std::array<std::array<SurgeVoice, MAX_VOICES>, 2> voices_array;
     // TODO: FIX SCENE ASSUMPTION!
@@ -161,7 +181,7 @@ class alignas(16) SurgeSynthesizer
     /*
      * So when surge was pre-juce we contemplated writing our own ID remapping between
      * internal indices and DAW IDs so put an indirectin and class in place. JUCE obviates
-     * the need for that by using hash of stremaing name as an ID consistently throuhg its
+     * the need for that by using hash of stremaing name as an ID consistently through its
      * param mechanism. I could, in theory, have gone right back to int as my accessor class
      * but there's something compelilng about keeping that indirection I plumbed in just in case
      * i need it in the future. So the ID class is now just a simple wrapper on an int which is
@@ -246,8 +266,31 @@ class alignas(16) SurgeSynthesizer
 
     void setMacroParameter01(long macroNum, float val);
     float getMacroParameter01(long macroNum) const;
+    float getMacroParameterTarget01(long macroNum) const;
     void applyMacroMonophonicModulation(long macroNum, float val);
 
+    // This is a method that, along with playNote(), allows for polyphonic control of the
+    // synthesizer.
+    //
+    // A "note expression" controls some aspect of a synthesizer voice. It can control the volume,
+    // pan, pitch (-120 to 120 key tuning), timbre (MPE timbre parameter 0..1) and pressure (channel
+    // AT or poly AT, depending on MPE mode, from 0..1).
+    //
+    // By specifying an arbitrary note_id, you can control any of the above parameters. This is
+    // entirely polyphonic, based on the given note_id. Alternatively, you can provide the other
+    // parameters (key and channel) to modify the ongoing note expression. Setting any of these
+    // parameters to -1 will skip them in the search (so, for example, you can search only by
+    // channel+key, or only by note_id).
+    //
+    // For example, to play a note at an arbitrary hz frequency "f" for a given strike velocity
+    // "velocity", you could do the following:
+    //   float k = 12.f*log2(f/440.f) + 69.f;  // Convert into standard 12TET
+    //   int mk = int(std::floor(k));          // The "key" value in 12TET.
+    //   float off = k - mk;                   // And the leftover hz outside of the standard key.
+    //   int note_id = <pick something arbitrary>;
+    //   playNote(0, mk, velocity, 0, note_id);
+    //   setNoteExpression(SurgeVoice::PITCH, note_id, mk, -1, off);
+    // Then, later, call releaseNote() as appropriate.
     void setNoteExpression(SurgeVoice::NoteExpressionType net, int32_t note_id, int16_t key,
                            int16_t channel, float value);
 
@@ -350,8 +393,10 @@ class alignas(16) SurgeSynthesizer
 
     void loadRaw(const void *data, int size, bool preset = false);
     void loadPatch(int id);
-    bool loadPatchByPath(const char *fxpPath, int categoryId, const char *name);
+    bool loadPatchByPath(const char *fxpPath, int categoryId, const char *name,
+                         bool forceIsPreset = true);
     void selectRandomPatch();
+    std::unique_ptr<std::thread> patchLoadThread;
 
     // if increment is true, we go to next patch, else go to previous patch
     void jogCategory(bool increment);
@@ -360,11 +405,24 @@ class alignas(16) SurgeSynthesizer
 
     void swapMetaControllers(int ct1, int ct2);
 
-    void savePatchToPath(fs::path p);
-    void savePatch(bool factoryInPlace = false);
+    void savePatchToPath(fs::path p, bool refreshPatchList = true);
+    void savePatch(bool factoryInPlace = false, bool skipOverwrite = false);
     void updateUsedState();
     void prepareModsourceDoProcess(int scenemask);
     unsigned int saveRaw(void **data);
+
+    // ----  'patch loaded' listener(s) ----
+    // Listeners are notified whenever a patch changes, with the path of the new patch.
+    // Listeners should do any significant work on their own thread; for example, the OSC
+    // patchLoadedListener calls OSCSender::send(), which runs on a juce::MessageManager thread.
+    //
+    // Be sure to delete any added listeners in the desctructor of the class that added them.
+    std::unordered_map<std::string, std::function<void(const fs::path &)>> patchLoadedListeners;
+    void addPatchLoadedListener(std::string key, std::function<void(const fs::path &)> const &l)
+    {
+        patchLoadedListeners.insert({key, l});
+    }
+    void deletePatchLoadedListener(std::string key) { patchLoadedListeners.erase(key); }
 
     // synth -> editor variables
     bool refresh_editor, patch_loaded;
@@ -384,6 +442,7 @@ class alignas(16) SurgeSynthesizer
     std::atomic<int> modwheelCC, pitchbendMIDIVal, sustainpedalCC;
 
     float vu_peak[8];
+    std::atomic<float> cpu_level{0.f};
 
     void populateDawExtraState();
 
@@ -394,7 +453,7 @@ class alignas(16) SurgeSynthesizer
     float masterfade = 0;
     bool approachingAllSoundsOff{false};
     // TODO: FIX SCENE ASSUMPTION (for halfbandA/B - use std::array)
-    HalfRateFilter halfbandA, halfbandB, halfbandIN;
+    sst::filters::HalfRate::HalfRateFilter halfbandA, halfbandB, halfbandIN;
     std::list<SurgeVoice *> voices[n_scenes];
     std::unique_ptr<Effect> fx[n_fx_slots];
     std::atomic<bool> halt_engine;
@@ -403,6 +462,7 @@ class alignas(16) SurgeSynthesizer
     int mpeVoices = 0;
     int mpeGlobalPitchBendRange = 0;
 
+    std::bitset<128> disallowedLearnCCs{0};
     std::array<uint64_t, 128> midiKeyPressedForScene[n_scenes];
     uint64_t orderedMidiKey = 0;
     std::atomic<uint64_t> midiNoteEvents{0};
@@ -419,8 +479,14 @@ class alignas(16) SurgeSynthesizer
     // TODO: FIX SCENE ASSUMPTION (use std::array)
     std::array<BiquadFilter, n_hpBQ> hpA, hpB;
 
-    bool fx_reload[n_fx_slots];   // if true, reload new effect parameters from fxsync
-    FxStorage fxsync[n_fx_slots]; // used for synchronisation of parameter init
+    bool fx_reload[n_fx_slots]; // if true, reload new effect parameters from fxsync
+    FxStorage fxsync[n_fx_slots]{
+        FxStorage(fxslot_ains1),   FxStorage(fxslot_ains2),   FxStorage(fxslot_bins1),
+        FxStorage(fxslot_bins2),   FxStorage(fxslot_send1),   FxStorage(fxslot_send2),
+        FxStorage(fxslot_global1), FxStorage(fxslot_global2), FxStorage(fxslot_ains3),
+        FxStorage(fxslot_ains4),   FxStorage(fxslot_bins3),   FxStorage(fxslot_bins4),
+        FxStorage(fxslot_send3),   FxStorage(fxslot_send4),   FxStorage(fxslot_global3),
+        FxStorage(fxslot_global4)}; // used for synchronisation of parameter init
     bool fx_reload_mod[n_fx_slots];
 
     struct FXModSyncItem
@@ -446,8 +512,6 @@ class alignas(16) SurgeSynthesizer
     std::list<HoldBufferItem> holdbuffer[n_scenes];
     void purgeHoldbuffer(int scene);
     void purgeDuplicateHeldVoicesInPolyMode(int scehe, int channel, int key);
-    quadr_osc sinus;
-    int demo_counter = 0;
 
     QuadFilterChainState *FBQ[n_scenes];
 
@@ -464,7 +528,7 @@ class alignas(16) SurgeSynthesizer
     void switch_toggled();
 
     // MIDI control interpolators
-    static const int num_controlinterpolators = 128;
+    static constexpr int num_controlinterpolators = 128;
     ControllerModulationSource mControlInterpolator[num_controlinterpolators];
     bool mControlInterpolatorUsed[num_controlinterpolators];
 
@@ -487,3 +551,4 @@ template <> struct hash<SurgeSynthesizer::ID>
 };
 
 } // namespace std
+#endif // SURGE_SRC_COMMON_SURGESYNTHESIZER_H

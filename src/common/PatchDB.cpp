@@ -1,27 +1,41 @@
 /*
-** Surge Synthesizer is Free and Open Source Software
-**
-** Surge is made available under the Gnu General Public License, v3.0
-** https://www.gnu.org/licenses/gpl-3.0.en.html
-**
-** Copyright 2004-2020 by various individuals as described by the Git transaction log
-**
-** All source at: https://github.com/surge-synthesizer/surge.git
-**
-** Surge was a commercial product from 2004-2018, with Copyright and ownership
-** in that period held by Claes Johanson at Vember Audio. Claes made Surge
-** open source in September 2018.
-*/
+ * Surge XT - a free and open source hybrid synthesizer,
+ * built by Surge Synth Team
+ *
+ * Learn more at https://surge-synthesizer.github.io/
+ *
+ * Copyright 2018-2023, various authors, as described in the GitHub
+ * transaction log.
+ *
+ * Surge XT is released under the GNU General Public Licence v3
+ * or later (GPL-3.0-or-later). The license is found in the "LICENSE"
+ * file in the root of this repository, or at
+ * https://www.gnu.org/licenses/gpl-3.0.en.html
+ *
+ * Surge was a commercial product from 2004-2018, copyright and ownership
+ * held by Claes Johanson at Vember Audio during that period.
+ * Claes made Surge open source in September 2018.
+ *
+ * All source for Surge XT is available at
+ * https://github.com/surge-synthesizer/surge
+ */
 
 #include "PatchDB.h"
 
-#include "sqlite3.h"
-#include "SurgeStorage.h"
 #include <sstream>
 #include <iterator>
-#include "vt_dsp_endian.h"
-#include "DebugHelpers.h"
 #include <chrono>
+#include <functional>
+
+#include "sqlite3.h"
+#include "SurgeStorage.h"
+#include "DebugHelpers.h"
+
+#include "sst/basic-blocks/mechanics/endian-ops.h"
+
+namespace mech = sst::basic_blocks::mechanics;
+
+#define TRACE_DB 0
 
 namespace Surge
 {
@@ -88,7 +102,7 @@ struct Statement
     {
         auto rc = sqlite3_prepare_v2(h, statement.c_str(), -1, &s, nullptr);
         if (rc != SQLITE_OK)
-            throw Exception(h);
+            throw Exception(rc, "Unable to prepare statement [" + statement + "]");
         prepared = true;
     }
     ~Statement()
@@ -225,9 +239,8 @@ struct TxnGuard
 
 struct PatchDB::WriterWorker
 {
-    static constexpr const char *schema_version = "11"; // I will rebuild if this is not my version
+    static constexpr const char *schema_version = "14"; // I will rebuild if this is not my version
 
-    // language=SQL
     static constexpr const char *setup_sql = R"SQL(
 DROP TABLE IF EXISTS "Patches";
 DROP TABLE IF EXISTS "PatchFeature";
@@ -242,6 +255,7 @@ CREATE TABLE "Patches" (
       id integer primary key,
       path varchar(2048),
       name varchar(256),
+      search_over varchar(1024),
       category varchar(2048),
       category_type int,
       last_write_time big int
@@ -302,6 +316,17 @@ CREATE TABLE IF NOT EXISTS Favorites (
         void go(WriterWorker &w) override { w.addDebug(msg); }
     };
 
+    struct EnQLambda : public EnQAble
+    {
+        std::function<void()> op{nullptr};
+        EnQLambda(std::function<void()> iop) : op(iop) {}
+        void go(WriterWorker &w) override
+        {
+            if (op)
+                op();
+        }
+    };
+
     struct EnQFavorite : public EnQAble
     {
         std::string path;
@@ -347,7 +372,9 @@ CREATE TABLE IF NOT EXISTS Favorites (
 
     void openDb()
     {
+#if TRACE_DB
         std::cout << ">>> Opening r/w DB" << std::endl;
+#endif
         auto flag = SQLITE_OPEN_NOMUTEX; // basically lock
         flag |= SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE;
 
@@ -371,7 +398,9 @@ CREATE TABLE IF NOT EXISTS Favorites (
 
     void closeDb()
     {
+#if TRACE_DB
         std::cout << "<<<< Closing r/w DB" << std::endl;
+#endif
         if (dbh)
             sqlite3_close(dbh);
         dbh = nullptr;
@@ -392,14 +421,18 @@ CREATE TABLE IF NOT EXISTS Favorites (
         void go(WriterWorker &w)
         {
             w.setupDatabase();
+#if TRACE_DB
             std::cout << "Done with EnQSetup" << std::endl;
+#endif
         }
     };
 
     std::atomic<bool> hasSetup{false};
     void setupDatabase()
     {
+#if TRACE_DB
         std::cout << "PatchDB : Setup Database " << dbname << std::endl;
+#endif
         /*
          * OK check my version
          */
@@ -412,11 +445,15 @@ CREATE TABLE IF NOT EXISTS Favorites (
             {
                 int id = st.col_int(0);
                 auto ver = st.col_charstar(1);
+#if TRACE_DB
                 std::cout << "        : schema check. DBVersion='" << ver << "' SchemaVersion='"
                           << schema_version << "'" << std::endl;
+#endif
                 if (strcmp(ver, schema_version) == 0)
                 {
+#if TRACE_DB
                     std::cout << "        : Schema matches. Reusing database." << std::endl;
+#endif
                     rebuild = false;
                 }
             }
@@ -436,8 +473,10 @@ CREATE TABLE IF NOT EXISTS Favorites (
         char *emsg;
         if (rebuild)
         {
+#if TRACE_DB
             std::cout << "        : Schema missing or mismatched. Dropping and Rebuilding Database."
                       << std::endl;
+#endif
             try
             {
                 SQL::Exec(dbh, setup_sql);
@@ -510,7 +549,9 @@ CREATE TABLE IF NOT EXISTS Favorites (
         doc.Parse(xml.c_str(), nullptr, TIXML_ENCODING_LEGACY);
         if (doc.Error())
         {
+#if TRACE_DB
             std::cout << "        - ERROR: Unable to load XML; Skipping file" << std::endl;
+#endif
             return res;
         }
 
@@ -518,7 +559,9 @@ CREATE TABLE IF NOT EXISTS Favorites (
 
         if (!patch)
         {
+#if TRACE_DB
             std::cout << "        - ERROR: No 'patch' element in XML" << std::endl;
+#endif
             return res;
         }
 
@@ -529,7 +572,9 @@ CREATE TABLE IF NOT EXISTS Favorites (
         }
         else
         {
+#if TRACE_DB
             std::cout << "        - ERROR: No Revision in XML" << std::endl;
+#endif
             return res;
         }
 
@@ -539,6 +584,17 @@ CREATE TABLE IF NOT EXISTS Favorites (
             if (meta->Attribute("author"))
             {
                 res.emplace_back("AUTHOR", STRING, 0, meta->Attribute("author"));
+            }
+
+            auto tags = TINYXML_SAFE_TO_ELEMENT(meta->FirstChild("tags"));
+            if (tags)
+            {
+                auto tag = tags->FirstChildElement();
+                while (tag)
+                {
+                    res.emplace_back("TAG", STRING, 0, tag->Attribute("tag"));
+                    tag = tag->NextSiblingElement();
+                }
             }
         }
 
@@ -686,7 +742,9 @@ CREATE TABLE IF NOT EXISTS Favorites (
 
         if (!fs::exists(p.path))
         {
+#if TRACE_DB
             std::cout << "    - Warning: Non existent " << path_to_string(p.path) << std::endl;
+#endif
             return;
         }
         // Check with
@@ -777,6 +835,9 @@ CREATE TABLE IF NOT EXISTS Favorites (
             return;
         }
 
+        std::ostringstream searchName;
+        searchName << p.name << " ";
+
         std::ifstream stream(p.path, std::ios::in | std::ios::binary);
         std::vector<uint8_t> contents((std::istreambuf_iterator<char>(stream)),
                                       std::istreambuf_iterator<char>());
@@ -810,15 +871,22 @@ CREATE TABLE IF NOT EXISTS Favorites (
 
         uint8_t *d = contents.data();
         auto *fxp = (fxChunkSetCustom *)d;
-        if ((vt_read_int32BE(fxp->chunkMagic) != 'CcnK') ||
-            (vt_read_int32BE(fxp->fxMagic) != 'FPCh') || (vt_read_int32BE(fxp->fxID) != 'cjs3'))
+        if ((mech::endian_read_int32BE(fxp->chunkMagic) != 'CcnK') ||
+            (mech::endian_read_int32BE(fxp->fxMagic) != 'FPCh') ||
+            (mech::endian_read_int32BE(fxp->fxID) != 'cjs3'))
         {
             return;
         }
 
         auto phd = d + sizeof(fxChunkSetCustom);
         auto *ph = (patch_header *)phd;
-        auto xmlSz = vt_read_int32LE(ph->xmlsize);
+        auto xmlSz = mech::endian_read_int32LE(ph->xmlsize);
+
+        if (!memcpy(ph->tag, "sub3", 4) || xmlSz < 0 || xmlSz > 1024 * 1024 * 1024)
+        {
+            std::cerr << "Skipping invalid patch : [" << p.path.u8string() << "]" << std::endl;
+            return;
+        }
 
         auto xd = phd + sizeof(patch_header);
         std::string xml(xd, xd + xmlSz);
@@ -832,6 +900,7 @@ CREATE TABLE IF NOT EXISTS Favorites (
             auto feat = extractFeaturesFromXML(xml);
             for (auto f : feat)
             {
+                auto ftype = std::get<0>(f);
                 ins.bindi64(1, patchid);
                 ins.bind(2, std::get<0>(f));
                 ins.bind(3, (int)std::get<1>(f));
@@ -842,8 +911,28 @@ CREATE TABLE IF NOT EXISTS Favorites (
 
                 ins.clearBindings();
                 ins.reset();
+                if (ftype == "TAG")
+                {
+                    searchName << " " << std::get<3>(f);
+                }
             }
 
+            ins.finalize();
+        }
+        catch (const SQL::Exception &e)
+        {
+            storage->reportError(e.what(), "PatchDB - FXP Features");
+            return;
+        }
+
+        auto sns = searchName.str();
+        try
+        {
+            auto ins = SQL::Statement(dbh, "UPDATE PATCHES SET search_over=?1 WHERE id=?2");
+            ins.bind(1, sns);
+            ins.bind(2, patchid);
+
+            ins.step();
             ins.finalize();
         }
         catch (const SQL::Exception &e)
@@ -1082,6 +1171,11 @@ void PatchDB::addSubCategory(const std::string &name, const std::string &parent,
 void PatchDB::addDebugMessage(const std::string &debug)
 {
     worker->enqueueWorkItem(new WriterWorker::EnQDebugMsg(debug));
+}
+
+void PatchDB::doAfterCurrentQueueDrained(std::function<void()> op)
+{
+    worker->enqueueWorkItem(new WriterWorker::EnQLambda(op));
 }
 
 std::vector<std::pair<std::string, int>> PatchDB::readAllFeatures()
@@ -1349,8 +1443,38 @@ int PatchDB::numberOfJobsOutstanding()
     return worker->pathQ.size();
 }
 
+int PatchDB::waitForJobsOutstandingComplete(int maxWaitInMS)
+{
+    int maxIts = maxWaitInMS / 10;
+    int njo = 0;
+    while ((njo = numberOfJobsOutstanding()) > 0 && maxIts > 0)
+    {
+        using namespace std::chrono_literals;
+        std::this_thread::sleep_for(10ms);
+        maxIts--;
+    }
+    return numberOfJobsOutstanding();
+}
+
 std::string PatchDB::sqlWhereClauseFor(const std::unique_ptr<PatchDBQueryParser::Token> &t)
 {
+    auto protect = [](const std::string &s) -> std::string {
+        std::vector<std::pair<std::string, std::string>> replacements{{"'", "''"}, {"%", "%%"}};
+        auto res = s;
+        for (const auto &[search, replace] : replacements)
+        {
+            size_t pos = res.find(search);
+            // Repeat till end is reached
+            while (pos != std::string::npos)
+            {
+                // Replace this occurrence of Sub String
+                res.replace(pos, search.size(), replace);
+                // Get the next occurrence from the current position
+                pos = res.find(search, pos + replace.size());
+            }
+        }
+        return res;
+    };
     std::ostringstream oss;
     switch (t->type)
     {
@@ -1360,12 +1484,12 @@ std::string PatchDB::sqlWhereClauseFor(const std::unique_ptr<PatchDBQueryParser:
     case PatchDBQueryParser::KEYWORD_EQUALS:
         if ((t->content == "AUTHOR" || t->content == "AUTH") && !t->children[0]->content.empty())
         {
-            oss << "(author LIKE '%" << t->children[0]->content << "%' )";
+            oss << "(author LIKE '%" << protect(t->children[0]->content) << "%' )";
         }
         else if ((t->content == "CATEGORY" || t->content == "CAT") &&
                  !t->children[0]->content.empty())
         {
-            oss << "(category LIKE '%" << t->children[0]->content << "%' )";
+            oss << "(category LIKE '%" << protect(t->children[0]->content) << "%' )";
         }
         else
         {
@@ -1373,7 +1497,7 @@ std::string PatchDB::sqlWhereClauseFor(const std::unique_ptr<PatchDBQueryParser:
         }
         break;
     case PatchDBQueryParser::LITERAL:
-        oss << "( p.name LIKE '%" << t->content << "%' )";
+        oss << "( p.search_over LIKE '%" << protect(t->content) << "%' )";
         break;
     case PatchDBQueryParser::AND:
     case PatchDBQueryParser::OR:
@@ -1401,7 +1525,7 @@ PatchDB::queryFromQueryString(const std::unique_ptr<PatchDBQueryParser::Token> &
 
     // FIXME - cache this by pushing it to the worker
     std::string query = "select p.id, p.path, p.category as category, p.name, pf.feature_svalue as "
-                        "author from Patches "
+                        "author, p.search_over from Patches "
                         "as p, PatchFeature as pf where pf.patch_id == p.id and pf.feature LIKE "
                         "'AUTHOR' and " +
                         sqlWhereClauseFor(t) + " ORDER BY p.category_type, p.category, p.name";

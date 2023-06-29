@@ -1,16 +1,23 @@
 /*
- ** Surge Synthesizer is Free and Open Source Software
- **
- ** Surge is made available under the Gnu General Public License, v3.0
- ** https://www.gnu.org/licenses/gpl-3.0.en.html
- **
- ** Copyright 2004-2021 by various individuals as described by the Git transaction log
- **
- ** All source at: https://github.com/surge-synthesizer/surge.git
- **
- ** Surge was a commercial product from 2004-2018, with Copyright and ownership
- ** in that period held by Claes Johanson at Vember Audio. Claes made Surge
- ** open source in September 2018.
+ * Surge XT - a free and open source hybrid synthesizer,
+ * built by Surge Synth Team
+ *
+ * Learn more at https://surge-synthesizer.github.io/
+ *
+ * Copyright 2018-2023, various authors, as described in the GitHub
+ * transaction log.
+ *
+ * Surge XT is released under the GNU General Public Licence v3
+ * or later (GPL-3.0-or-later). The license is found in the "LICENSE"
+ * file in the root of this repository, or at
+ * https://www.gnu.org/licenses/gpl-3.0.en.html
+ *
+ * Surge was a commercial product from 2004-2018, copyright and ownership
+ * held by Claes Johanson at Vember Audio during that period.
+ * Claes made Surge open source in September 2018.
+ *
+ * All source for Surge XT is available at
+ * https://github.com/surge-synthesizer/surge
  */
 
 #include "OverlayWrapper.h"
@@ -80,7 +87,13 @@ void OverlayWrapper::paint(juce::Graphics &g)
 
     if (icon)
     {
+        const auto iconSize = titlebarSize;
+
+#if MAC
+        icon->drawAt(g, sp.getRight() - iconSize + 1, sp.getY() + 1, 1);
+#else
         icon->drawAt(g, sp.getX() + 2, sp.getY() + 1, 1);
+#endif
     }
 
     g.setColour(skin->getColor(Colors::Dialog::Border));
@@ -99,14 +112,22 @@ void OverlayWrapper::addAndTakeOwnership(std::unique_ptr<juce::Component> c)
 
     auto q = sp.reduced(2 * margin, 2 * margin)
                  .withTrimmedBottom(titlebarSize)
-                 .translated(0, titlebarSize + 0 * margin);
+                 .translated(0, titlebarSize);
     primaryChild = std::move(c);
     primaryChild->setBounds(q);
 
     auto buttonSize = titlebarSize;
-    auto closeButtonBounds =
+    juce::Rectangle<int> closeButtonBounds;
+    juce::Rectangle<int> tearOutButtonBounds;
+
+#if MAC
+    closeButtonBounds = getLocalBounds().withSize(buttonSize, buttonSize).translated(2, 2);
+    tearOutButtonBounds = closeButtonBounds.translated(buttonSize + 2, 0);
+#else
+    closeButtonBounds =
         getLocalBounds().withHeight(buttonSize).withLeft(getWidth() - buttonSize).translated(-2, 2);
-    auto tearOutButtonBounds = closeButtonBounds.translated(-buttonSize - 2, 0);
+    tearOutButtonBounds = closeButtonBounds.translated(-buttonSize - 2, 0);
+#endif
 
     if (showCloseButton)
     {
@@ -245,9 +266,16 @@ struct TearOutWindow : public juce::DocumentWindow, public Surge::GUI::SkinConsu
     {
         isPinned = !isPinned;
 
-        Surge::Storage::updateUserDefaultValue(wrapping->storage,
-                                               std::get<2>(wrapping->canTearOutData), isPinned);
-
+        if (Surge::GUI::getIsStandalone())
+        {
+            Surge::Storage::updateUserDefaultValue(wrapping->storage,
+                                                   std::get<2>(wrapping->canTearOutData), isPinned);
+        }
+        else
+        {
+            Surge::Storage::updateUserDefaultValue(wrapping->storage,
+                                                   std::get<3>(wrapping->canTearOutData), isPinned);
+        }
         setAlwaysOnTop(isPinned);
         repaint();
     }
@@ -275,10 +303,12 @@ struct TearOutWindow : public juce::DocumentWindow, public Surge::GUI::SkinConsu
 
         auto tba = getTitleBarArea();
         auto tbh = tba.getHeight() + 5;
-        auto xPos = tba.getRight() - (3 * tbh);
 
+// reposition the pin button to the other side on Mac
 #if MAC
-        xPos = 3 * xPos;
+        auto xPos = tba.getX() + (2 * tbh);
+#else
+        auto xPos = tba.getRight() - (3 * tbh);
 #endif
 
         auto r = juce::Rectangle<int>(xPos, 1, tbh, tbh);
@@ -312,7 +342,12 @@ struct TearOutWindow : public juce::DocumentWindow, public Surge::GUI::SkinConsu
 
         outstandingMoves++;
         // writing every move would be "bad". Add a 1 second delay.
-        juce::Timer::callAfterDelay(1000, [this]() { this->moveUpdate(); });
+        juce::Timer::callAfterDelay(1000, [that = juce::Component::SafePointer(this)]() {
+            if (that)
+            {
+                that->moveUpdate();
+            }
+        });
     }
 
     void moveUpdate()
@@ -438,6 +473,9 @@ void OverlayWrapper::doTearOut(const juce::Point<int> &showAt)
     dw->supressMoveUpdates = true;
     dw->setContentNonOwned(this, false);
     dw->setSkin(skin, associatedBitmapStore);
+    // This doesn't work but i think that's because we drop the icon in our DW L&F
+    // It does, however, create a renderable image
+    // dw->setIcon(associatedBitmapStore->getImage(IDB_SURGE_ICON)->asJuceImage());
 
     auto brd = dw->getContentComponentBorder();
 

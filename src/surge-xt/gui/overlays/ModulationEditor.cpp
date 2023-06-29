@@ -1,17 +1,24 @@
 /*
-** Surge Synthesizer is Free and Open Source Software
-**
-** Surge is made available under the Gnu General Public License, v3.0
-** https://www.gnu.org/licenses/gpl-3.0.en.html
-**
-** Copyright 2004-2021 by various individuals as described by the Git transaction log
-**
-** All source at: https://github.com/surge-synthesizer/surge.git
-**
-** Surge was a commercial product from 2004-2018, with Copyright and ownership
-** in that period held by Claes Johanson at Vember Audio. Claes made Surge
-** open source in September 2018.
-*/
+ * Surge XT - a free and open source hybrid synthesizer,
+ * built by Surge Synth Team
+ *
+ * Learn more at https://surge-synthesizer.github.io/
+ *
+ * Copyright 2018-2023, various authors, as described in the GitHub
+ * transaction log.
+ *
+ * Surge XT is released under the GNU General Public Licence v3
+ * or later (GPL-3.0-or-later). The license is found in the "LICENSE"
+ * file in the root of this repository, or at
+ * https://www.gnu.org/licenses/gpl-3.0.en.html
+ *
+ * Surge was a commercial product from 2004-2018, copyright and ownership
+ * held by Claes Johanson at Vember Audio during that period.
+ * Claes made Surge open source in September 2018.
+ *
+ * All source for Surge XT is available at
+ * https://github.com/surge-synthesizer/surge
+ */
 
 #include "ModulationEditor.h"
 #include "SurgeSynthesizer.h"
@@ -131,6 +138,15 @@ struct ModulationSideControls : public juce::Component,
         dispW->setValue(dwv / 3.0);
         dispW->setDraggable(true);
         valueChanged(dispW.get());
+
+        copyW = std::make_unique<Surge::Widgets::SelfDrawButton>("Copy to Clipboard");
+        copyW->setAccessible(true);
+        copyW->setStorage(&(editor->synth->storage));
+        copyW->setTitle("Copy to Clipboard");
+        copyW->setDescription("Copy to Clipboard");
+        copyW->setSkin(skin);
+        copyW->onClick = [this]() { doCopyToClipboard(); };
+        addAndMakeVisible(*copyW);
     }
 
     void resized() override
@@ -162,6 +178,9 @@ struct ModulationSideControls : public juce::Component,
         dispL->setBounds(b);
         b = b.translated(0, h);
         dispW->setBounds(b.withHeight(h * 4));
+
+        b = b.translated(0, h * 4.5 + m);
+        copyW->setBounds(b);
     }
 
     void paint(juce::Graphics &g) override
@@ -241,9 +260,12 @@ struct ModulationSideControls : public juce::Component,
         }
     }
 
+    void doCopyToClipboard();
+
     std::unique_ptr<juce::Label> sortL, filterL, addL, dispL;
     std::unique_ptr<Surge::Widgets::MultiSwitchSelfDraw> sortW, filterW, addSourceW, addTargetW,
         dispW;
+    std::unique_ptr<Surge::Widgets::SelfDrawButton> copyW;
     SurgeGUIEditor *sge;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ModulationSideControls);
@@ -253,17 +275,40 @@ struct ModulationListContents : public juce::Component, public Surge::GUI::SkinC
 {
     struct ModListIconButton : public Surge::Widgets::TinyLittleIconButton
     {
-        ModListIconButton(int off, std::function<void()> cb)
-            : Surge::Widgets::TinyLittleIconButton(off, std::move(cb))
+        SurgeStorage *storage{nullptr};
+        ModListIconButton(int off, std::function<void()> cb, SurgeStorage *s)
+            : Surge::Widgets::TinyLittleIconButton(off, std::move(cb)), storage(s)
         {
         }
 
-        std::unique_ptr<juce::AccessibilityHandler> createAccessibilityHandler()
+        std::unique_ptr<juce::AccessibilityHandler> createAccessibilityHandler() override
         {
             return std::make_unique<juce::AccessibilityHandler>(
                 *this, juce::AccessibilityRole::button,
                 juce::AccessibilityActions().addAction(juce::AccessibilityActionType::press,
                                                        [this]() { this->callback(); }));
+        }
+
+        bool keyPressed(const juce::KeyPress &key) override
+        {
+            if (!storage)
+                return false;
+            auto [action, mod] = Surge::Widgets::accessibleEditAction(key, storage);
+            if (action == Widgets::Return)
+            {
+                callback();
+                return true;
+            }
+            return false;
+        }
+
+        std::function<void()> onFocusFromTabFn{nullptr};
+        void focusGained(FocusChangeType cause) override
+        {
+            if (onFocusFromTabFn && cause == FocusChangeType::focusChangedByTabKey)
+            {
+                onFocusFromTabFn();
+            }
         }
     };
     ModulationEditor *editor{nullptr};
@@ -340,56 +385,79 @@ struct ModulationListContents : public juce::Component, public Surge::GUI::SkinC
         static constexpr int height = 32;
         Datum datum;
         ModulationListContents *contents{nullptr};
+        int idx{0};
 
-        DataRowEditor(const Datum &d, ModulationListContents *c) : datum(d), contents(c)
+        DataRowEditor(const Datum &d, int idxi, ModulationListContents *c)
+            : datum(d), idx(idxi), contents(c)
         {
-            clearButton = std::make_unique<ModListIconButton>(1, [this]() {
-                auto me = contents->editor;
-                ModulationEditor::SelfModulationGuard g(me);
-                contents->editor->ed->pushModulationToUndoRedo(
-                    datum.destination_id + datum.idBase, (modsources)datum.source_id,
-                    datum.source_scene, datum.source_index, Surge::GUI::UndoManager::UNDO);
-                me->synth->clearModulation(datum.destination_id + datum.idBase,
-                                           (modsources)datum.source_id, datum.source_scene,
-                                           datum.source_index);
-                // The rebuild may delete this so defer
-                auto c = contents;
-                juce::Timer::callAfterDelay(1, [c, me]() {
-                    c->rebuildFrom(me->synth);
-                    me->ed->queue_refresh = true;
-                });
-            });
+            clearButton = std::make_unique<ModListIconButton>(
+                1,
+                [this]() {
+                    auto me = contents->editor;
+                    contents->preferredFocusRow = idx;
+                    ModulationEditor::SelfModulationGuard g(me);
+                    contents->editor->ed->pushModulationToUndoRedo(
+                        datum.destination_id + datum.idBase, (modsources)datum.source_id,
+                        datum.source_scene, datum.source_index, Surge::GUI::UndoManager::UNDO);
+                    me->synth->clearModulation(datum.destination_id + datum.idBase,
+                                               (modsources)datum.source_id, datum.source_scene,
+                                               datum.source_index);
+                    // The rebuild may delete this so defer
+                    auto c = contents;
+                    juce::Timer::callAfterDelay(1, [c, me]() {
+                        c->rebuildFrom(me->synth);
+                        me->ed->queue_refresh = true;
+                    });
+                },
+                &c->editor->synth->storage);
             clearButton->setAccessible(true);
             clearButton->setTitle("Clear");
             clearButton->setDescription("Clear");
             clearButton->setWantsKeyboardFocus(true);
+            clearButton->onFocusFromTabFn = [this]() {
+                int nAbove = 7;
+                if (idx >= nAbove)
+                {
+                    auto p = idx - nAbove;
+                    int off = (p == 0 ? 0 : -1);
+                    contents->editor->viewport->setViewPosition(0, p * height + off);
+                }
+            };
             addAndMakeVisible(*clearButton);
 
             muted = d.isMuted;
-            muteButton = std::make_unique<ModListIconButton>(2, [this]() {
-                auto me = contents->editor;
-                ModulationEditor::SelfModulationGuard g(me);
-                contents->editor->ed->pushModulationToUndoRedo(
-                    datum.destination_id + datum.idBase, (modsources)datum.source_id,
-                    datum.source_scene, datum.source_index, Surge::GUI::UndoManager::UNDO);
+            muteButton = std::make_unique<ModListIconButton>(
+                2,
+                [this]() {
+                    auto me = contents->editor;
+                    contents->preferredFocusRow = idx;
+                    ModulationEditor::SelfModulationGuard g(me);
+                    contents->editor->ed->pushModulationToUndoRedo(
+                        datum.destination_id + datum.idBase, (modsources)datum.source_id,
+                        datum.source_scene, datum.source_index, Surge::GUI::UndoManager::UNDO);
 
-                me->synth->muteModulation(datum.destination_id + datum.idBase,
-                                          (modsources)datum.source_id, datum.source_scene,
-                                          datum.source_index, !muted);
-                muted = !muted;
-                contents->rebuildFrom(me->synth);
-            });
+                    me->synth->muteModulation(datum.destination_id + datum.idBase,
+                                              (modsources)datum.source_id, datum.source_scene,
+                                              datum.source_index, !muted);
+                    muted = !muted;
+                    contents->rebuildFrom(me->synth);
+                },
+                &c->editor->synth->storage);
             muteButton->setAccessible(true);
             muteButton->setWantsKeyboardFocus(true);
             addAndMakeVisible(*muteButton);
 
-            pencilButton = std::make_unique<ModListIconButton>(0, [this]() {
-                auto sge = contents->editor->ed;
-                auto p = contents->editor->synth->storage.getPatch()
-                             .param_ptr[datum.destination_id + datum.idBase];
-                sge->promptForUserValueEntry(p, pencilButton.get(), datum.source_id,
-                                             datum.source_scene, datum.source_index);
-            });
+            pencilButton = std::make_unique<ModListIconButton>(
+                0,
+                [this]() {
+                    auto sge = contents->editor->ed;
+                    contents->preferredFocusRow = idx;
+                    auto p = contents->editor->synth->storage.getPatch()
+                                 .param_ptr[datum.destination_id + datum.idBase];
+                    sge->promptForUserValueEntry(p, pencilButton.get(), datum.source_id,
+                                                 datum.source_scene, datum.source_index);
+                },
+                &c->editor->synth->storage);
             pencilButton->setAccessible(true);
             pencilButton->setTitle("Edit");
             pencilButton->setDescription("Edit");
@@ -407,6 +475,7 @@ struct ModulationListContents : public juce::Component, public Surge::GUI::SkinC
             surgeLikeSlider->setTitle("Depth");
             surgeLikeSlider->setDescription("Depth");
             surgeLikeSlider->setWantsKeyboardFocus(true);
+            surgeLikeSlider->customToAccessibleString = [this] { return datum.mss.dvalplus; };
             addAndMakeVisible(*surgeLikeSlider);
 
             setAccessible(true);
@@ -448,6 +517,29 @@ struct ModulationListContents : public juce::Component, public Surge::GUI::SkinC
             repaint();
         }
 
+        void beTheFocusedRow()
+        {
+            if (!contents->editor)
+                return;
+            if (!contents->editor->viewport)
+                return;
+            if (!surgeLikeSlider->isVisible())
+                return;
+
+            int nAbove = 7;
+            if (idx >= nAbove)
+            {
+                auto p = idx - nAbove;
+                int off = (p == 0 ? 0 : -1);
+                contents->editor->viewport->setViewPosition(0, p * height + off);
+            }
+            else
+            {
+                contents->editor->viewport->setViewPosition(0, 0);
+            }
+            if (surgeLikeSlider->isShowing())
+                surgeLikeSlider->grabKeyboardFocus();
+        }
         bool firstInSort{false}, hasFollower{false};
         bool isTop{false}, isAfterTop{false}, isLast{false};
 
@@ -818,7 +910,7 @@ struct ModulationListContents : public juce::Component, public Surge::GUI::SkinC
         d.sname = sname + sceneMod;
         d.pname = nm;
 
-        char pdisp[256];
+        char pdisp[TXT_SIZE];
         int ptag = p->id;
         auto thisms = (modsources)d.source_id;
 
@@ -913,6 +1005,7 @@ struct ModulationListContents : public juce::Component, public Surge::GUI::SkinC
 
         std::string priorN = "-";
 
+        int idx = 0;
         for (const auto &d : dataRows)
         {
             auto included = filterOn == NONE || (filterOn == SOURCE && d.sname == filterString) ||
@@ -924,7 +1017,7 @@ struct ModulationListContents : public juce::Component, public Surge::GUI::SkinC
             {
                 continue;
             }
-            auto l = std::make_unique<DataRowEditor>(d, this);
+            auto l = std::make_unique<DataRowEditor>(d, idx++, this);
             auto sortName = sortOrder == BY_SOURCE ? d.sname : d.pname;
 
             l->setSkin(skin, associatedBitmapStore);
@@ -993,7 +1086,15 @@ struct ModulationListContents : public juce::Component, public Surge::GUI::SkinC
         }
 
         moved(); // to refresh the 'istop'
+
+        if (preferredFocusRow < 0 || preferredFocusRow >= dataRows.size())
+            preferredFocusRow = 0;
+
+        if (preferredFocusRow >= 0 && preferredFocusRow < rows.size() && rows[preferredFocusRow])
+            rows[preferredFocusRow]->beTheFocusedRow();
     }
+
+    int preferredFocusRow{0};
 
     void updateAllValues(const SurgeSynthesizer *synth)
     {
@@ -1023,6 +1124,18 @@ struct ModulationListContents : public juce::Component, public Surge::GUI::SkinC
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ModulationListContents);
 };
+
+void ModulationSideControls::doCopyToClipboard()
+{
+    std::ostringstream oss;
+    oss << "Modulation List for " << editor->ed->getStorage()->getPatch().name << "\n";
+    for (const auto &r : editor->modContents->dataRows)
+    {
+        oss << "  Source: " << r.sname << "; Target: " << r.pname << "; Depth:  " << r.mss.valplus
+            << " " << (r.isBipolar ? "(Bipolar)" : "(Unipolar)") << "\n";
+    }
+    juce::SystemClipboard::copyTextToClipboard(oss.str());
+}
 
 void ModulationSideControls::valueChanged(GUI::IComponentTagValue *c)
 {
@@ -1227,6 +1340,7 @@ void ModulationSideControls::showAddSourceMenu()
         {
             modsources ms = (modsources)modsource_display_order[k];
             popMenu = nullptr;
+
             if (ms >= ms_ctrl1 && ms <= ms_ctrl1 + n_customcontrollers - 1 && sc == 0)
             {
                 popMenu = &addMacroSub;
@@ -1274,9 +1388,11 @@ void ModulationSideControls::showAddSourceMenu()
                 {
                     int maxidx = synth->getMaxModulationIndex(sc, ms);
                     auto subm = juce::PopupMenu();
+
                     for (int i = 0; i < maxidx; ++i)
                     {
                         auto subn = sge->modulatorNameWithIndex(sc, ms, i, false, false);
+
                         subm.addItem(subn, [this, ms, i, sc, subn]() {
                             add_ms = ms;
                             add_ms_idx = i;
@@ -1288,12 +1404,14 @@ void ModulationSideControls::showAddSourceMenu()
                             repaint();
                         });
                     }
+
                     popMenu->addSubMenu(
                         sge->modulatorNameWithIndex(sc, ms, -1, false, false, false), subm);
                 }
                 else
                 {
                     auto sn = sge->modulatorNameWithIndex(sc, ms, 0, false, false);
+
                     popMenu->addItem(sn, [this, sn, sc, ms]() {
                         add_ms = ms;
                         add_ms_idx = 0;

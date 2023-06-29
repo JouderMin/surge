@@ -1,17 +1,24 @@
 /*
-** Surge Synthesizer is Free and Open Source Software
-**
-** Surge is made available under the Gnu General Public License, v3.0
-** https://www.gnu.org/licenses/gpl-3.0.en.html
-**
-** Copyright 2004-2021 by various individuals as described by the Git transaction log
-**
-** All source at: https://github.com/surge-synthesizer/surge.git
-**
-** Surge was a commercial product from 2004-2018, with Copyright and ownership
-** in that period held by Claes Johanson at Vember Audio. Claes made Surge
-** open source in September 2018.
-*/
+ * Surge XT - a free and open source hybrid synthesizer,
+ * built by Surge Synth Team
+ *
+ * Learn more at https://surge-synthesizer.github.io/
+ *
+ * Copyright 2018-2023, various authors, as described in the GitHub
+ * transaction log.
+ *
+ * Surge XT is released under the GNU General Public Licence v3
+ * or later (GPL-3.0-or-later). The license is found in the "LICENSE"
+ * file in the root of this repository, or at
+ * https://www.gnu.org/licenses/gpl-3.0.en.html
+ *
+ * Surge was a commercial product from 2004-2018, copyright and ownership
+ * held by Claes Johanson at Vember Audio during that period.
+ * Claes made Surge open source in September 2018.
+ *
+ * All source for Surge XT is available at
+ * https://github.com/surge-synthesizer/surge
+ */
 
 #include "XMLConfiguredMenus.h"
 #include "SurgeStorage.h"
@@ -21,6 +28,7 @@
 #include "SurgeImage.h"
 #include "AccessibleHelpers.h"
 #include "MenuCustomComponents.h"
+#include "widgets/EffectChooser.h"
 
 namespace Surge
 {
@@ -248,7 +256,8 @@ void XMLMenuPopulator::populate()
 
             if (depth == 1 && hasFac && hasUser)
             {
-                m.addSectionHeader("FACTORY PRESETS");
+                Surge::Widgets::MenuCenteredBoldLabel::addToMenuAsSectionHeader(m,
+                                                                                "FACTORY PRESETS");
             }
 
             for (auto c : children)
@@ -268,7 +277,8 @@ void XMLMenuPopulator::populate()
                     {
                         inFac = false;
                         m.addColumnBreak();
-                        m.addSectionHeader("USER PRESETS");
+                        Surge::Widgets::MenuCenteredBoldLabel::addToMenuAsSectionHeader(
+                            m, "USER PRESETS");
                     }
                     auto idx = c->idx;
                     m.addItem(c->name, [host, n = c->name, idx]() { host->loadByIndex(n, idx); });
@@ -283,7 +293,7 @@ void XMLMenuPopulator::populate()
                 {
                     if (c->colBreak)
                         m.addColumnBreak();
-                    m.addSectionHeader(c->name);
+                    Surge::Widgets::MenuCenteredBoldLabel::addToMenuAsSectionHeader(m, c->name);
                 }
                 break;
                 case FOLD:
@@ -406,7 +416,7 @@ void OscillatorMenu::populate()
 
     if (sge)
     {
-        auto hu = sge->helpURLForSpecial("oscillators");
+        auto hu = sge->helpURLForSpecial("osc-select");
         auto lurl = hu;
 
         if (hu != "")
@@ -424,6 +434,24 @@ void OscillatorMenu::populate()
         hmen->setCentered(false);
 
         menu.addCustomItem(-1, std::move(hmen), nullptr, title);
+
+#if SURGE_HAS_OSC
+        if (storage->oscListenerRunning)
+        {
+            menu.addSeparator();
+
+            auto oscName = storage->getPatch().scene[sc].osc[osc].type.get_osc_name();
+
+            auto i =
+                juce::PopupMenu::Item(fmt::format("OSC: {}", oscName))
+                    .setEnabled(true)
+                    .setAction([oscName]() { juce::SystemClipboard::copyTextToClipboard(oscName); })
+                    .setColour(
+                        sge->currentSkin->getColor(Colors::PopupMenu::Text).withAlpha(0.75f));
+
+            menu.addItem(i);
+        }
+#endif
     }
 }
 
@@ -433,6 +461,8 @@ void OscillatorMenu::mouseDown(const juce::MouseEvent &event)
     {
         return;
     }
+
+    populate();
 
     auto sge = firstListenerOfType<SurgeGUIEditor>();
 
@@ -527,6 +557,7 @@ template <typename T> struct XMLMenuAH : public juce::AccessibilityHandler
                            .addAction(juce::AccessibilityActionType::press,
                                       [this]() { this->showMenu(); }),
                        AccessibilityHandler::Interfaces{std::make_unique<XMLMenuTextValue>(s)})
+
     {
     }
     void showMenu() { comp->menu.showMenuAsync(juce::PopupMenu::Options()); }
@@ -599,6 +630,8 @@ void FxMenu::mouseDown(const juce::MouseEvent &event)
 
     auto sge = firstListenerOfType<SurgeGUIEditor>();
 
+    populate();
+
     stuckHoverOn();
     menu.showMenuAsync(sge->popupMenuOptions(this),
                        Surge::GUI::makeAsyncCallback<FxMenu>(this, [](auto *that, int) {
@@ -640,8 +673,10 @@ void FxMenu::loadSnapshot(int type, TiXmlElement *e, int idx)
             {
                 double d;
                 int j;
-                char lbl[TXT_SIZE], sublbl[TXT_SIZE];
-                snprintf(lbl, TXT_SIZE, "p%i", i);
+                std::string lbl;
+
+                lbl = fmt::format("p{:d}", i);
+
                 if (fxbuffer->p[i].valtype == vt_float)
                 {
                     if (e->QueryDoubleAttribute(lbl, &d) == TIXML_SUCCESS)
@@ -653,17 +688,21 @@ void FxMenu::loadSnapshot(int type, TiXmlElement *e, int idx)
                         fxbuffer->p[i].set_storage_value(j);
                 }
 
-                snprintf(sublbl, TXT_SIZE, "p%i_temposync", i);
+                lbl = fmt::format("p{:d}_temposync", i);
                 fxbuffer->p[i].temposync =
-                    ((e->QueryIntAttribute(sublbl, &j) == TIXML_SUCCESS) && (j == 1));
-                snprintf(sublbl, TXT_SIZE, "p%i_extend_range", i);
+                    ((e->QueryIntAttribute(lbl, &j) == TIXML_SUCCESS) && (j == 1));
+
+                lbl = fmt::format("p{:d}_extend_range", i);
                 fxbuffer->p[i].set_extend_range(
-                    ((e->QueryIntAttribute(sublbl, &j) == TIXML_SUCCESS) && (j == 1)));
-                snprintf(sublbl, TXT_SIZE, "p%i_deactivated", i);
+                    ((e->QueryIntAttribute(lbl, &j) == TIXML_SUCCESS) && (j == 1)));
+
+                lbl = fmt::format("p{:d}_deactivated", i);
                 fxbuffer->p[i].deactivated =
-                    ((e->QueryIntAttribute(sublbl, &j) == TIXML_SUCCESS) && (j == 1));
-                snprintf(sublbl, TXT_SIZE, "p%i_deform_type", i);
-                if (e->QueryIntAttribute(sublbl, &j) == TIXML_SUCCESS)
+                    ((e->QueryIntAttribute(lbl, &j) == TIXML_SUCCESS) && (j == 1));
+
+                lbl = fmt::format("p{:d}_deform_type", i);
+
+                if (e->QueryIntAttribute(lbl, &j) == TIXML_SUCCESS)
                     fxbuffer->p[i].deform_type = j;
             }
         }
@@ -674,7 +713,7 @@ void FxMenu::loadSnapshot(int type, TiXmlElement *e, int idx)
     }
 }
 
-void FxMenu::populate()
+void FxMenu::populateForContext(bool isCalledInEffectChooser)
 {
     auto sge = firstListenerOfType<SurgeGUIEditor>();
 
@@ -683,17 +722,67 @@ void FxMenu::populate()
 
     XMLMenuPopulator::populate();
 
-    menu.addColumnBreak();
-    menu.addSectionHeader("FUNCTIONS");
+    auto cfxid = -1;
+    auto cfxtype = 0;
+    bool addDeact = false;
+    bool isDeact = false;
+    bool enableClear = true;
 
-    menu.addItem(Surge::GUI::toOSCase("Clear Current FX Unit"), [this]() {
-        loadSnapshot(fxt_off, nullptr, 0);
-        if (getControlListener())
+    if (sge)
+    {
+        cfxid = sge->effectChooser->currentClicked;
+
+        if (cfxid >= 0)
         {
-            getControlListener()->valueChanged(asControlValueInterface());
+            auto deactbm = sge->effectChooser->getDeactivatedBitmask();
+
+            addDeact = true;
+            isDeact = deactbm & (1 << cfxid);
+            cfxtype = sge->effectChooser->fxTypes[cfxid];
+            enableClear = cfxtype != fxt_off;
         }
-        repaint();
-    });
+    }
+
+    auto cfx = std::string{"Current FX Slot"};
+    auto helpMenuText = std::string{"FX Presets"};
+    auto helpMenuScreeReaderText = helpMenuText;
+
+    if (cfxid >= 0 && cfxid < n_fx_slots)
+    {
+        if (isCalledInEffectChooser)
+        {
+            cfx = fxslot_longnames[cfxid];
+            helpMenuText = cfx;
+        }
+
+        helpMenuScreeReaderText =
+            fmt::format("FX Presets: {} {}", fxslot_longnames[cfxid], fx_type_names[cfxtype]);
+    }
+
+    menu.addColumnBreak();
+    Surge::Widgets::MenuCenteredBoldLabel::addToMenuAsSectionHeader(menu, "FUNCTIONS");
+
+    if (addDeact)
+    {
+        menu.addItem(
+            Surge::GUI::toOSCase(fmt::format("{} {}", (isDeact ? "Activate" : "Deactivate"), cfx)),
+            [that = juce::Component::SafePointer(sge->effectChooser.get())]() {
+                that->toggleSelectedDeactivation();
+                that->repaint();
+            });
+    }
+
+    menu.addItem(Surge::GUI::toOSCase(fmt::format("Clear {}", cfx)), enableClear, false,
+                 [this, cfxid, that = juce::Component::SafePointer(sge->effectChooser.get())]() {
+                     that->setEffectSlotDeactivation(cfxid, false);
+                     that->repaint();
+                     loadSnapshot(fxt_off, nullptr, 0);
+                     if (getControlListener())
+                     {
+                         getControlListener()->valueChanged(asControlValueInterface());
+                     }
+                     repaint();
+                 });
 
     if (sge)
     {
@@ -757,11 +846,30 @@ void FxMenu::populate()
             lurl = sge->fullyResolvedHelpURL(hu);
         }
 
-        auto hmen = std::make_unique<Surge::Widgets::MenuTitleHelpComponent>("FX Presets", lurl);
+        auto hmen = std::make_unique<Surge::Widgets::MenuTitleHelpComponent>(
+            helpMenuText, helpMenuScreeReaderText, lurl);
         hmen->setSkin(skin, associatedBitmapStore);
         hmen->setCentered(false);
 
-        menu.addCustomItem(-1, std::move(hmen), nullptr, "FX Presets");
+        menu.addCustomItem(-1, std::move(hmen), nullptr, helpMenuScreeReaderText);
+
+#if SURGE_HAS_OSC
+        if (storage->oscListenerRunning)
+        {
+            menu.addSeparator();
+
+            auto oscName = storage->getPatch().fx[sge->current_fx].type.get_osc_name();
+
+            auto i =
+                juce::PopupMenu::Item(fmt::format("OSC: {}", oscName))
+                    .setEnabled(true)
+                    .setAction([oscName]() { juce::SystemClipboard::copyTextToClipboard(oscName); })
+                    .setColour(
+                        sge->currentSkin->getColor(Colors::PopupMenu::Text).withAlpha(0.75f));
+
+            menu.addItem(i);
+        }
+#endif
     }
 }
 
@@ -770,7 +878,7 @@ Surge::FxClipboard::Clipboard FxMenu::fxClipboard;
 void FxMenu::copyFX()
 {
     Surge::FxClipboard::copyFx(storage, fx, fxClipboard);
-    memcpy((void *)fxbuffer, (void *)fx, sizeof(FxStorage));
+    *fxbuffer = *fx;
 }
 
 void FxMenu::pasteFX()

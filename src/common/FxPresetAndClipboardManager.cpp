@@ -1,17 +1,24 @@
 /*
-** Surge Synthesizer is Free and Open Source Software
-**
-** Surge is made available under the Gnu General Public License, v3.0
-** https://www.gnu.org/licenses/gpl-3.0.en.html
-**
-** Copyright 2004-2021 by various individuals as described by the Git transaction log
-**
-** All source at: https://github.com/surge-synthesizer/surge.git
-**
-** Surge was a commercial product from 2004-2018, with Copyright and ownership
-** in that period held by Claes Johanson at Vember Audio. Claes made Surge
-** open source in September 2018.
-*/
+ * Surge XT - a free and open source hybrid synthesizer,
+ * built by Surge Synth Team
+ *
+ * Learn more at https://surge-synthesizer.github.io/
+ *
+ * Copyright 2018-2023, various authors, as described in the GitHub
+ * transaction log.
+ *
+ * Surge XT is released under the GNU General Public Licence v3
+ * or later (GPL-3.0-or-later). The license is found in the "LICENSE"
+ * file in the root of this repository, or at
+ * https://www.gnu.org/licenses/gpl-3.0.en.html
+ *
+ * Surge was a commercial product from 2004-2018, copyright and ownership
+ * held by Claes Johanson at Vember Audio during that period.
+ * Claes made Surge open source in September 2018.
+ *
+ * All source for Surge XT is available at
+ * https://github.com/surge-synthesizer/surge
+ */
 
 #include "FxPresetAndClipboardManager.h"
 #include "StringOps.h"
@@ -106,11 +113,6 @@ void FxUserPreset::doPresetRescan(SurgeStorage *storage, bool forceRescan)
             if (!s)
                 goto badPreset;
 
-            if (!s->Attribute("name"))
-                goto badPreset;
-
-            preset.name = s->Attribute("name");
-
             if (s->QueryIntAttribute("type", &t) != TIXML_SUCCESS)
                 goto badPreset;
 
@@ -136,43 +138,8 @@ void FxUserPreset::doPresetRescan(SurgeStorage *storage, bool forceRescan)
                 startCatPath++;
             }
 
-            for (int i = 0; i < n_fx_params; ++i)
-            {
-                double fl;
-                std::string p = "p";
-
-                if (s->QueryDoubleAttribute((p + std::to_string(i)).c_str(), &fl) == TIXML_SUCCESS)
-                {
-                    preset.p[i] = fl;
-                }
-
-                if (s->QueryDoubleAttribute((p + std::to_string(i) + "_temposync").c_str(), &fl) ==
-                        TIXML_SUCCESS &&
-                    fl != 0)
-                {
-                    preset.ts[i] = true;
-                }
-
-                if (s->QueryDoubleAttribute((p + std::to_string(i) + "_extend_range").c_str(),
-                                            &fl) == TIXML_SUCCESS &&
-                    fl != 0)
-                {
-                    preset.er[i] = true;
-                }
-
-                if (s->QueryDoubleAttribute((p + std::to_string(i) + "_deactivated").c_str(),
-                                            &fl) == TIXML_SUCCESS &&
-                    fl != 0)
-                {
-                    preset.da[i] = true;
-                }
-
-                if (s->QueryDoubleAttribute((p + std::to_string(i) + "_deform_type").c_str(),
-                                            &fl) == TIXML_SUCCESS)
-                {
-                    preset.dt[i] = (int)fl;
-                }
-            }
+            if (!readFromXMLSnapshot(preset, s))
+                goto badPreset;
 
             if (scannedPresets.find(preset.type) == scannedPresets.end())
             {
@@ -208,6 +175,60 @@ void FxUserPreset::doPresetRescan(SurgeStorage *storage, bool forceRescan)
             }
         });
     }
+}
+
+bool FxUserPreset::readFromXMLSnapshot(Preset &preset, TiXmlElement *s)
+{
+    if (!s->Attribute("name"))
+        return false;
+
+    preset.name = s->Attribute("name");
+
+    int t;
+    if (s->QueryIntAttribute("type", &t) == TIXML_SUCCESS)
+    {
+        // The individual entry overrides the type. Thats OK!
+        preset.type = t;
+    }
+
+    for (int i = 0; i < n_fx_params; ++i)
+    {
+        double fl;
+        std::string p = "p";
+
+        if (s->QueryDoubleAttribute((p + std::to_string(i)).c_str(), &fl) == TIXML_SUCCESS)
+        {
+            preset.p[i] = fl;
+        }
+
+        if (s->QueryDoubleAttribute((p + std::to_string(i) + "_temposync").c_str(), &fl) ==
+                TIXML_SUCCESS &&
+            fl != 0)
+        {
+            preset.ts[i] = true;
+        }
+
+        if (s->QueryDoubleAttribute((p + std::to_string(i) + "_extend_range").c_str(), &fl) ==
+                TIXML_SUCCESS &&
+            fl != 0)
+        {
+            preset.er[i] = true;
+        }
+
+        if (s->QueryDoubleAttribute((p + std::to_string(i) + "_deactivated").c_str(), &fl) ==
+                TIXML_SUCCESS &&
+            fl != 0)
+        {
+            preset.da[i] = true;
+        }
+
+        if (s->QueryDoubleAttribute((p + std::to_string(i) + "_deform_type").c_str(), &fl) ==
+            TIXML_SUCCESS)
+        {
+            preset.dt[i] = (int)fl;
+        }
+    }
+    return true;
 }
 
 std::vector<FxUserPreset::Preset> FxUserPreset::getPresetsForSingleType(int id)

@@ -1,19 +1,27 @@
 /*
-** Surge Synthesizer is Free and Open Source Software
-**
-** Surge is made available under the Gnu General Public License, v3.0
-** https://www.gnu.org/licenses/gpl-3.0.en.html
-**
-** Copyright 2004-2020 by various individuals as described by the Git transaction log
-**
-** All source at: https://github.com/surge-synthesizer/surge.git
-**
-** Surge was a commercial product from 2004-2018, with Copyright and ownership
-** in that period held by Claes Johanson at Vember Audio. Claes made Surge
-** open source in September 2018.
-*/
+ * Surge XT - a free and open source hybrid synthesizer,
+ * built by Surge Synth Team
+ *
+ * Learn more at https://surge-synthesizer.github.io/
+ *
+ * Copyright 2018-2023, various authors, as described in the GitHub
+ * transaction log.
+ *
+ * Surge XT is released under the GNU General Public Licence v3
+ * or later (GPL-3.0-or-later). The license is found in the "LICENSE"
+ * file in the root of this repository, or at
+ * https://www.gnu.org/licenses/gpl-3.0.en.html
+ *
+ * Surge was a commercial product from 2004-2018, copyright and ownership
+ * held by Claes Johanson at Vember Audio during that period.
+ * Claes made Surge open source in September 2018.
+ *
+ * All source for Surge XT is available at
+ * https://github.com/surge-synthesizer/surge
+ */
 
-#pragma once
+#ifndef SURGE_SRC_COMMON_DSP_SURGEVOICE_H
+#define SURGE_SRC_COMMON_DSP_SURGEVOICE_H
 #include "SurgeStorage.h"
 #include "Oscillator.h"
 #include "SurgeVoiceState.h"
@@ -40,7 +48,8 @@ class alignas(16) SurgeVoice
                int velocity, int channel, int scene_id, float detune, MidiKeyState *keyState,
                MidiChannelState *mainChannelState, MidiChannelState *voiceChannelState,
                bool mpeEnabled, int64_t voiceOrder, int32_t host_note_id,
-               int16_t originating_host_key, int16_t originating_host_channel);
+               int16_t originating_host_key, int16_t originating_host_channel, float aegStart,
+               float fegStart);
     ~SurgeVoice();
 
     void release();
@@ -55,6 +64,8 @@ class alignas(16) SurgeVoice
     int osctype[n_oscs];
     SurgeVoiceState state;
     int age, age_release;
+
+    bool matchesChannelKeyId(int16_t channel, int16_t key, int32_t host_noteid);
 
     /*
      * Begin implementing host-provided identifiers for voices for polyphonic
@@ -100,6 +111,11 @@ class alignas(16) SurgeVoice
     inline float noteShiftFromPitchParam(float note0 /* the key + octave */,
                                          int oscNum /* The osc for pitch diffs */)
     {
+        if (localcopy[scene->osc[oscNum].pitch.param_id_in_scene].f == 0)
+        {
+            return note0;
+        }
+
         if (scene->osc[oscNum].pitch.absolute)
         {
             // remember note_to_pitch is linear interpolation on storage->table_pitch from
@@ -168,6 +184,29 @@ class alignas(16) SurgeVoice
                                (scene->osc[oscNum].pitch.extend_range ? 12.f : 1.f);
         }
     }
+
+    void getAEGFEGLevel(float &aeg, float &feg)
+    {
+        aeg = ampEGSource.get_output(0);
+        feg = filterEGSource.get_output(0);
+    }
+
+    void restartAEGFEGAttack(float aeg, float feg)
+    {
+        ampEGSource.attackFrom(aeg);
+        filterEGSource.attackFrom(feg);
+    }
+
+    void resetVelocity(int midiVelocity)
+    {
+        state.velocity = midiVelocity;
+        state.fvel = midiVelocity / 127.0;
+        velocitySource.set_target(0, state.fvel);
+    }
+
+    void retriggerLFOEnvelopes();
+    void retriggerOSCWithIndependentAttacks();
+    void resetPortamentoFrom(int key, int channel);
 
     static float channelKeyEquvialent(float key, int channel, bool isMpeEnabled,
                                       SurgeStorage *storage, bool remapKeyForTuning = true);
@@ -240,7 +279,8 @@ class alignas(16) SurgeVoice
     std::array<ModulationSource *, n_modsources> modsources;
 
   private:
-    ModulationSource velocitySource, releaseVelocitySource;
+    ControllerModulationSource velocitySource;
+    ModulationSource releaseVelocitySource;
     ModulationSource keytrackSource;
     ControllerModulationSource polyAftertouchSource;
     ControllerModulationSource monoAftertouchSource;
@@ -256,3 +296,10 @@ class alignas(16) SurgeVoice
     // MPE special cases
     bool mpeEnabled;
 };
+
+void all_ring_modes_block(float *__restrict src1_l, float *__restrict src2_l,
+                          float *__restrict src1_r, float *__restrict src2_r,
+                          float *__restrict dst_l, float *__restrict dst_r, bool is_wide, int mode,
+                          lipol_ps osclevels, unsigned int nquads);
+
+#endif // SURGE_SRC_COMMON_DSP_SURGEVOICE_H

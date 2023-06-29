@@ -1,3 +1,24 @@
+/*
+ * Surge XT - a free and open source hybrid synthesizer,
+ * built by Surge Synth Team
+ *
+ * Learn more at https://surge-synthesizer.github.io/
+ *
+ * Copyright 2018-2023, various authors, as described in the GitHub
+ * transaction log.
+ *
+ * Surge XT is released under the GNU General Public Licence v3
+ * or later (GPL-3.0-or-later). The license is found in the "LICENSE"
+ * file in the root of this repository, or at
+ * https://www.gnu.org/licenses/gpl-3.0.en.html
+ *
+ * Surge was a commercial product from 2004-2018, copyright and ownership
+ * held by Claes Johanson at Vember Audio during that period.
+ * Claes made Surge open source in September 2018.
+ *
+ * All source for Surge XT is available at
+ * https://github.com/surge-synthesizer/surge
+ */
 #include "HeadlessUtils.h"
 #include "Player.h"
 #include "filesystem/import.h"
@@ -27,17 +48,38 @@ void initializePatchDB()
 
 void restreamTemplatesWithModifications()
 {
-    auto templatesDir = string_to_path("resources/data/patches_factory/Templates");
-    for (auto d : fs::directory_iterator(templatesDir))
+    auto templatesDir = string_to_path("resources/data/patches_3rdparty");
+    for (auto d : fs::recursive_directory_iterator(templatesDir))
     {
-        std::cout << "ReStream " << path_to_string(d) << std::endl;
-        auto surge = Surge::Headless::createSurge(44100);
-        surge->loadPatchByPath(path_to_string(d).c_str(), -1, "Templates");
-        for (int i = 0; i < 10; ++i)
+        if (d.path().extension() != ".fxp")
+            continue;
+
+        std::cout << d.path().u8string() << std::endl;
+
+        auto surge = Surge::Headless::createSurge(44100, false);
+        surge->loadPatchByPath(path_to_string(d).c_str(), -1, "ReStreamer", false);
+        for (int i = 0; i < 2; ++i)
             surge->process();
 
-        auto oR = surge->storage.getPatch().streamingRevision;
-        std::cout << "  Stream Revision : " << oR << " vs " << ff_revision << std::endl;
+        auto m1 = surge->storage.getPatch().scene[0].polymode.val.i;
+        auto m2 = surge->storage.getPatch().scene[1].polymode.val.i;
+
+        if (m1 == pm_poly && m2 == pm_poly)
+            continue;
+        std::cout << "   ReStream " << path_to_string(d) << std::endl;
+        if (m1 != pm_poly)
+            surge->storage.getPatch().scene[0].monoVoiceEnvelopeMode =
+                MonoVoiceEnvelopeMode::RESTART_FROM_LATEST;
+        if (m2 != pm_poly)
+            surge->storage.getPatch().scene[1].monoVoiceEnvelopeMode =
+                MonoVoiceEnvelopeMode::RESTART_FROM_LATEST;
+
+        for (int i = 0; i < 2; ++i)
+            surge->process();
+
+        surge->savePatchToPath(d, false);
+
+        /*
         if (oR < 15)
         {
             std::cout << "  Fixing Comb Filter" << std::endl;
@@ -58,6 +100,7 @@ void restreamTemplatesWithModifications()
 
             surge->savePatchToPath(d);
         }
+         */
     }
 }
 
@@ -145,7 +188,7 @@ void standardCutoffCurve(int ft, int sft, std::ostream &os)
         if (firstTime)
         {
             firstTime = false;
-            char fn[256], st[256], con[256], ron[256];
+            char fn[TXT_SIZE], st[TXT_SIZE], con[TXT_SIZE], ron[TXT_SIZE];
             surge->storage.getPatch().scene[0].filterunit[0].type.get_display(fn);
             surge->storage.getPatch().scene[0].filterunit[0].subtype.get_display(st);
             surge->storage.getPatch().scene[0].filterunit[0].cutoff.get_display(con);
@@ -315,7 +358,7 @@ void middleCSawIntoFilterVsCutoff(int ft, int sft, std::ostream &os)
         if (firstTime)
         {
             firstTime = false;
-            char fn[256], st[256], con[256], ron[256];
+            char fn[TXT_SIZE], st[TXT_SIZE], con[TXT_SIZE], ron[TXT_SIZE];
             surge->storage.getPatch().scene[0].filterunit[0].type.get_display(fn);
             surge->storage.getPatch().scene[0].filterunit[0].subtype.get_display(st);
             std::ostringstream oss;
@@ -419,7 +462,7 @@ void middleCSawIntoFilterVsReso(int ft, int sft, std::ostream &os)
         if (firstTime)
         {
             firstTime = false;
-            char fn[256], st[256], con[256], ron[256];
+            char fn[TXT_SIZE], st[TXT_SIZE], con[TXT_SIZE], ron[TXT_SIZE];
             surge->storage.getPatch().scene[0].filterunit[0].type.get_display(fn);
             surge->storage.getPatch().scene[0].filterunit[0].subtype.get_display(st);
             std::ostringstream oss;
@@ -494,7 +537,7 @@ void filterAnalyzer(int ft, int sft, std::ostream &os)
 [[noreturn]] void performancePlay(const std::string &patchName, int mode)
 {
     auto surge = Surge::Headless::createSurge(48000);
-    std::cout << "Performance Mode with surge at 48k\n"
+    std::cout << "Performance Mode with Surge XT at 48k\n"
               << "-- Ctrl-C to exit\n"
               << "-- patchName = " << patchName << "\n"
               << "-- mode = " << mode << std::endl;
@@ -607,7 +650,7 @@ void generateNLFeedbackNorms()
         {
             surge->process();
         }
-        char td[256], sd[256], cd[256];
+        char td[TXT_SIZE], sd[TXT_SIZE], cd[TXT_SIZE];
 
         surge->storage.getPatch().scene[0].filterunit[0].type.get_display(td);
         surge->storage.getPatch().scene[0].filterunit[0].subtype.get_display(sd);

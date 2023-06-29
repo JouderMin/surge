@@ -1,19 +1,27 @@
 /*
-** Surge Synthesizer is Free and Open Source Software
-**
-** Surge is made available under the Gnu General Public License, v3.0
-** https://www.gnu.org/licenses/gpl-3.0.en.html
-**
-** Copyright 2004-2021 by various individuals as described by the Git transaction log
-**
-** All source at: https://github.com/surge-synthesizer/surge.git
-**
-** Surge was a commercial product from 2004-2018, with Copyright and ownership
-** in that period held by Claes Johanson at Vember Audio. Claes made Surge
-** open source in September 2018.
-*/
+ * Surge XT - a free and open source hybrid synthesizer,
+ * built by Surge Synth Team
+ *
+ * Learn more at https://surge-synthesizer.github.io/
+ *
+ * Copyright 2018-2023, various authors, as described in the GitHub
+ * transaction log.
+ *
+ * Surge XT is released under the GNU General Public Licence v3
+ * or later (GPL-3.0-or-later). The license is found in the "LICENSE"
+ * file in the root of this repository, or at
+ * https://www.gnu.org/licenses/gpl-3.0.en.html
+ *
+ * Surge was a commercial product from 2004-2018, copyright and ownership
+ * held by Claes Johanson at Vember Audio during that period.
+ * Claes made Surge open source in September 2018.
+ *
+ * All source for Surge XT is available at
+ * https://github.com/surge-synthesizer/surge
+ */
 
-#pragma once
+#ifndef SURGE_SRC_COMMON_PARAMETER_H
+#define SURGE_SRC_COMMON_PARAMETER_H
 #include "globals.h"
 #include <string>
 #include <memory>
@@ -21,6 +29,8 @@
 #include <functional>
 #include <atomic>
 #include "SkinModel.h"
+
+#include "sst/basic-blocks/params/ParamMetadata.h"
 
 union pdata
 {
@@ -50,11 +60,13 @@ enum ctrltypes
     ct_percent_bipolar_with_string_filter_hook,
     ct_percent_bipolar_w_dynamic_unipolar_formatting,
     ct_percent_with_extend_to_bipolar,
+    ct_noise_color,
     ct_twist_aux_mix,
     ct_pitch_octave,
     ct_pitch_semi7bp,
     ct_pitch_semi7bp_absolutable,
     ct_pitch,
+    ct_pitch_extendable_very_low_minval,
     ct_fmratio,
     ct_fmratio_int,
     ct_pbdepth,
@@ -78,7 +90,8 @@ enum ctrltypes
     ct_freq_audible_deactivatable_hp,
     ct_freq_audible_deactivatable_lp,
     ct_freq_audible_with_tunability, // we abuse 'extended' to mean 'use SCL tuning'
-    ct_freq_audible_with_very_low_lowerbound,
+    ct_freq_audible_very_low_minval,
+    ct_freq_audible_fm3_extendable,
     ct_freq_mod,
     ct_freq_hpf,
     ct_freq_shift,
@@ -111,7 +124,6 @@ enum ctrltypes
     ct_wstype,
     ct_wt2window,
     ct_osccount,
-    ct_osccountWT,
     ct_oscspread,
     ct_oscspread_bipolar,
     ct_scenemode,
@@ -130,12 +142,11 @@ enum ctrltypes
     ct_bool_solo,
     ct_oscroute,
     ct_stereowidth,
-    ct_bool_fm,
     ct_character,
     ct_sineoscmode,
     ct_sinefmlegacy,
-    ct_countedset_percent,            // what % through a counted set are you
-    ct_countedset_percent_extendable, // what % through a counted set are you
+    ct_countedset_percent,            // what % through a counted set are we
+    ct_countedset_percent_extendable, // what % through a counted set are we
     ct_vocoder_bandcount,
     ct_distortion_waveshape,
     ct_flangerpitch,
@@ -191,6 +202,12 @@ enum ctrltypes
     ct_mscodec,
     ct_percent_bipolar_pan, // bipolar with special text strings at -100%, +100% and 0%
     ct_spring_decay,
+    ct_amplitude_ringmod,
+    ct_bonsai_bass_boost,
+    ct_bonsai_sat_filter,
+    ct_bonsai_sat_mode,
+    ct_bonsai_noise_mode,
+
     num_ctrltypes,
 };
 
@@ -264,7 +281,7 @@ struct ParameterDynamicNameFunction
  */
 struct ParameterDynamicBoolFunction
 {
-    virtual const bool getValue(const Parameter *p) const = 0;
+    virtual bool getValue(const Parameter *p) const = 0;
 };
 
 struct ParameterDynamicDeactivationFunction : public ParameterDynamicBoolFunction
@@ -340,13 +357,6 @@ struct ModulationDisplayInfoWindowStrings
 
 class SurgeStorage;
 
-/*
-** WARNING!
-**
-** Parameter is copied with memcpy
-** Therefore, don't have complex types as members!
-*/
-
 class Parameter
 {
   public:
@@ -354,7 +364,7 @@ class Parameter
 
   private:
     Parameter *assign(ParameterIDCounter::promise_t id, int pid, const char *name,
-                      const char *dispname, int ctrltype,
+                      const char *dispname, const std::string_view altOSCname, int ctrltype,
 
                       std::string ui_identifier, int posx, int posy,
 
@@ -364,13 +374,14 @@ class Parameter
 
   public:
     Parameter *assign(ParameterIDCounter::promise_t id, int pid, const char *name,
-                      const char *dispname, int ctrltype,
+                      const char *dispname, const std::string_view altOSCname, int ctrltype,
 
                       const Surge::Skin::Connector &c,
 
                       int scene = 0, ControlGroup ctrlgroup = cg_GLOBAL, int ctrlgroup_entry = 0,
                       bool modulateable = true, int ctrlstyle = cs_off,
                       bool defaultDeactivation = true);
+
     virtual ~Parameter();
 
     bool can_temposync() const;
@@ -414,7 +425,11 @@ class Parameter
     const char *get_internal_name() const;
     const char *get_storage_name() const;
     const wchar_t *getUnit() const;
+
+    /* this is now deprecated and will be removed in favor of std::string variant */
     void get_display(char *txt, bool external = false, float ef = 0.f) const;
+
+    std::string get_display(bool external = false, float ef = 0.f) const;
 
     enum ModulationDisplayMode
     {
@@ -429,6 +444,8 @@ class Parameter
         IsLarger,
         Special,
     };
+
+    std::optional<sst::basic_blocks::params::ParamMetaData> basicBlocksParamMetaData;
 
     void get_display_of_modulation_depth(char *txt, float modulationDepth, bool isBipolar,
                                          ModulationDisplayMode mode,
@@ -468,6 +485,9 @@ class Parameter
     void create_fullname(const char *dn, char *fn, ControlGroup ctrlgroup, int ctrlgroup_entry,
                          const char *lfoPrefixOverride = nullptr) const;
 
+    std::string oscName;
+    std::string get_osc_name() { return oscName; }
+
     pdata val{}, val_default{}, val_min{}, val_max{};
 
     // You might be tempted to use a non-fixed-size member here, like a std::string, but
@@ -487,6 +507,7 @@ class Parameter
     int ctrlgroup_entry = 0;
     int ctrlstyle = cs_off;
     int midictrl{};
+    int midichan{};
     int param_id_in_scene{};
     bool affect_other_parameters{};
     float moverate{};
@@ -557,7 +578,7 @@ class Parameter
     // I know this is a bit gross but we have a runtime type
     ParamUserData *user_data = nullptr;
 
-    // I take a shallow copy and don't assume ownership and assume I am referencable
+    // I take a shallow copy and don't assume ownership and assume I am referenceable
     void set_user_data(ParamUserData *ud);
 
     bool supportsDynamicName() const;
@@ -596,4 +617,7 @@ class Parameter
 };
 
 // I don't make this a member since param needs to be copyable with memcpy.
+// TODO: Don't need to worry about that anymore.
 extern std::atomic<bool> parameterNameUpdated;
+
+#endif // SURGE_SRC_COMMON_PARAMETER_H

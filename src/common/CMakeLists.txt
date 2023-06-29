@@ -4,34 +4,98 @@ project(surge-common)
 surge_add_lib_subdirectory(airwindows)
 surge_add_lib_subdirectory(eurorack)
 surge_add_lib_subdirectory(fmt)
-surge_add_lib_subdirectory(oddsound-mts)
+
+# Make MTS optional
+if (NOT SURGE_SKIP_ODDSOUND_MTS)
+   surge_add_lib_subdirectory(oddsound-mts)
+else()
+   add_library(oddsound-mts INTERFACE)
+   target_compile_definitions(oddsound-mts INTERFACE SURGE_SKIP_ODDSOUND_MTS)
+   add_library(surge::oddsound-mts ALIAS oddsound-mts)
+endif()
+
 if(MINGW)
   set(HAVE_VISIBILITY 0 CACHE INTERNAL "Force-disable libsamplerate's visibility check on MinGW")
 endif()
 surge_add_lib_subdirectory(libsamplerate)
+surge_add_lib_subdirectory(pffft)
 surge_add_lib_subdirectory(tuning-library)
 surge_add_lib_subdirectory(sqlite-3.23.3)
-surge_add_lib_subdirectory(LuaJitLib)
 
+if (NOT SURGE_SKIP_LUA)
+  surge_add_lib_subdirectory(LuaJitLib)
+  target_compile_definitions(luajit-5.1 INTERFACE HAS_LUA=1)
+else()
+  # Make sure we know it is missing
+  add_library(luajit-5.1 INTERFACE)
+  target_compile_definitions(luajit-5.1 INTERFACE HAS_LUA=0)
+endif()
+
+surge_add_lib_subdirectory(sst/sst-basic-blocks)
 surge_add_lib_subdirectory(sst/sst-cpputils)
 surge_add_lib_subdirectory(sst/sst-plugininfra)
 surge_add_lib_subdirectory(sst/sst-filters)
 surge_add_lib_subdirectory(sst/sst-waveshapers)
+surge_add_lib_subdirectory(sst/sst-effects)
 
 set(PEGTL_BUILD_TESTS OFF CACHE BOOL "")
 set(PEGTL_BUILD_EXAMPLES OFF CACHE BOOL "")
 surge_add_lib_subdirectory(PEGTL)
 
-juce_add_binary_data(surge-common-binary
-  NAMESPACE SurgeSharedBinary
-  HEADER_NAME SurgeSharedBinary.h
-  SOURCES
-  ${CMAKE_SOURCE_DIR}/resources/surge-shared/configuration.xml
-  ${CMAKE_SOURCE_DIR}/resources/surge-shared/README_UserArea.txt
-  ${CMAKE_SOURCE_DIR}/resources/surge-shared/memoryWavetable.wt
-  ${CMAKE_SOURCE_DIR}/resources/surge-shared/windows.wt
-  ${CMAKE_SOURCE_DIR}/resources/surge-shared/paramdocumentation.xml
-  )
+if (NOT SURGE_SKIP_JUCE_FOR_RACK)
+  juce_add_binary_data(surge-common-binary
+    NAMESPACE SurgeSharedBinary
+    HEADER_NAME SurgeSharedBinary.h
+    SOURCES
+    ${SURGE_SOURCE_DIR}/resources/surge-shared/configuration.xml
+    ${SURGE_SOURCE_DIR}/resources/surge-shared/README_UserArea.txt
+    ${SURGE_SOURCE_DIR}/resources/surge-shared/memoryWavetable.wt
+    ${SURGE_SOURCE_DIR}/resources/surge-shared/windows.wt
+    ${SURGE_SOURCE_DIR}/resources/surge-shared/paramdocumentation.xml
+    )
+  target_compile_definitions(surge-common-binary PUBLIC HAS_JUCE=1 SKIP_JUCE=0)
+
+else()
+  # So what the heck is this? Well a few effects use juce_dsp so this
+  # is code which skips the entire juce build infrastructure but buids the
+  # source of juce_dsp, juce_audio_basic and juce_cde as a lib we can link
+  # into rac so we can get spring reverb and neuron
+  add_library(surge-common-binary INTERFACE)
+  target_compile_definitions(surge-common-binary INTERFACE HAS_JUCE=0 SKIP_JUCE=1)
+
+  add_library(juce_dsp_rack_sub STATIC
+          ${SURGE_JUCE_PATH}/modules/juce_audio_basics/juce_audio_basics.cpp
+          ${SURGE_JUCE_PATH}/modules/juce_dsp/juce_dsp.cpp
+          )
+  if (APPLE)
+    target_sources(juce_dsp_rack_sub PRIVATE
+            ${SURGE_JUCE_PATH}/modules/juce_core/juce_core.mm
+            ${SURGE_JUCE_PATH}/modules/juce_audio_formats/juce_audio_formats.mm
+            )
+  else()
+    target_sources(juce_dsp_rack_sub PRIVATE
+            ${SURGE_JUCE_PATH}/modules/juce_core/juce_core.cpp
+            ${SURGE_JUCE_PATH}/modules/juce_audio_formats/juce_audio_formats.cpp
+            )
+  endif()
+  target_compile_definitions(juce_dsp_rack_sub PUBLIC
+          NDEBUG=$<IF:$<CONFIG:Release>,1,0>
+          JUCE_GLOBAL_MODULE_SETTINGS_INCLUDED=1
+          JUCE_MODULE_AVAILABLE_juce_dsp=1
+          JUCE_MODULE_AVAILABLE_juce_audio_basics=1
+          JUCE_MODULE_AVAILABLE_juce_core=1
+          JUCE_MODULE_VAILABLE_juce_audio_formats=1
+          JUCE_STANDALONE_APPLICATION=0
+          JUCE_USE_CURL=0
+          JUCE_WEB_BROWSER=0
+          JUCE_USE_FLAC=0
+          JUCE_USE_OGGVORBIS=0
+          JUCE_USE_WINDOWS_MEDIA_FORMAT=0
+          )
+  target_include_directories(juce_dsp_rack_sub PUBLIC ${SURGE_JUCE_PATH}/modules)
+
+  add_library(juce::juce_dsp ALIAS juce_dsp_rack_sub)
+endif()
 
 add_library(${PROJECT_NAME}
   DebugHelpers.cpp
@@ -68,6 +132,7 @@ add_library(${PROJECT_NAME}
   UserDefaults.cpp
   UserDefaults.h
   WAVFileSupport.cpp
+  dsp/DSPExternalAdapterUtils.cpp
   dsp/Effect.cpp
   dsp/Effect.h
   dsp/Oscillator.cpp
@@ -83,6 +148,8 @@ add_library(${PROJECT_NAME}
   dsp/WavetableScriptEvaluator.h
   dsp/effects/BBDEnsembleEffect.cpp
   dsp/effects/BBDEnsembleEffect.h
+  dsp/effects/BonsaiEffect.cpp
+  dsp/effects/BonsaiEffect.h
   dsp/effects/ChorusEffect.h
   dsp/effects/ChorusEffectImpl.h
   dsp/effects/CombulatorEffect.cpp
@@ -175,8 +242,9 @@ add_library(${PROJECT_NAME}
   dsp/effects/chowdsp/tape/LossFilter.h
   dsp/effects/chowdsp/tape/ToneControl.cpp
   dsp/effects/chowdsp/tape/ToneControl.h
+  dsp/effects/AudioInputEffect.cpp
+  dsp/effects/AudioInputEffect.h
   dsp/filters/AllpassFilter.h
-  dsp/filters/BiquadFilter.cpp
   dsp/filters/BiquadFilter.h
   dsp/filters/VectorizedSVFilter.cpp
   dsp/filters/VectorizedSVFilter.h
@@ -213,29 +281,17 @@ add_library(${PROJECT_NAME}
   dsp/oscillators/WavetableOscillator.h
   dsp/oscillators/WindowOscillator.cpp
   dsp/oscillators/WindowOscillator.h
-  dsp/utilities/DSPUtils.cpp
   dsp/utilities/DSPUtils.h
-  dsp/utilities/FastMath.h
-  dsp/utilities/LanczosResampler.cpp
-  dsp/utilities/LanczosResampler.h
   dsp/utilities/SSEComplex.h
   dsp/utilities/SSESincDelayLine.h
-  dsp/vembertech/basic_dsp.cpp
-  dsp/vembertech/basic_dsp.h
-  dsp/vembertech/halfratefilter.cpp
-  dsp/vembertech/halfratefilter.h
-  dsp/vembertech/lipol.cpp
-  dsp/vembertech/lipol.h
-  dsp/vembertech/portable_intrinsics.h
-  dsp/vembertech/shared.h
-  dsp/vembertech/vt_dsp.h
-  dsp/vembertech/vt_dsp_endian.h
   globals.h
   resource.h
   version.cpp.in
   version.h
   )
 
+target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(${PROJECT_NAME} PUBLIC SURGE_COMPILE_BLOCK_SIZE=${SURGE_COMPILE_BLOCK_SIZE})
 if(APPLE)
   target_compile_definitions(${PROJECT_NAME} PUBLIC MAC=1)
   target_link_libraries(${PROJECT_NAME}
@@ -247,10 +303,16 @@ if(APPLE)
     )
 elseif(UNIX)
   target_compile_definitions(${PROJECT_NAME} PUBLIC LINUX=1)
-  target_link_libraries(${PROJECT_NAME} PRIVATE
-    pthread
-    -Wl,--no-undefined
-    )
+  if(SKBUILD)
+    target_link_libraries(${PROJECT_NAME} PRIVATE
+      pthread
+      )
+  else()
+    target_link_libraries(${PROJECT_NAME} PRIVATE
+      pthread
+      -Wl,--no-undefined
+      )
+  endif()
   if(CMAKE_SYSTEM_NAME MATCHES "BSD")
     target_link_libraries(${PROJECT_NAME} PRIVATE execinfo)
   endif()
@@ -273,22 +335,22 @@ endif()
 option(SURGE_RELIABLE_VERSION_INFO "Update version info on every build (off: generate only at configuration time)" ON)
 if(SURGE_RELIABLE_VERSION_INFO)
   add_custom_target(version-info BYPRODUCTS ${CMAKE_BINARY_DIR}/geninclude/version.cpp
-    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    WORKING_DIRECTORY ${SURGE_SOURCE_DIR}
     COMMAND ${CMAKE_COMMAND} -D CMAKE_PROJECT_VERSION_MAJOR=${CMAKE_PROJECT_VERSION_MAJOR}
     -D CMAKE_PROJECT_VERSION_MINOR=${CMAKE_PROJECT_VERSION_MINOR}
-    -D SURGESRC=${CMAKE_SOURCE_DIR} -D SURGEBLD=${CMAKE_BINARY_DIR}
+    -D SURGESRC=${SURGE_SOURCE_DIR} -D SURGEBLD=${CMAKE_BINARY_DIR}
     -D AZURE_PIPELINE=${AZURE_PIPELINE}
     -D WIN32=${WIN32}
     -D CMAKE_INSTALL_PREFIX=${CMAKE_INSTALL_PREFIX}
     -D CMAKE_CXX_COMPILER_ID=${CMAKE_CXX_COMPILER_ID}
     -D CMAKE_CXX_COMPILER_VERSION=${CMAKE_CXX_COMPILER_VERSION}
-    -P ${CMAKE_SOURCE_DIR}/cmake/versiontools.cmake
+    -P ${SURGE_SOURCE_DIR}/cmake/versiontools.cmake
     )
   add_dependencies(${PROJECT_NAME} version-info)
 else()
-  set(SURGESRC ${CMAKE_SOURCE_DIR})
+  set(SURGESRC ${SURGE_SOURCE_DIR})
   set(SURGEBLD ${CMAKE_BINARY_DIR})
-  include(${CMAKE_SOURCE_DIR}/cmake/versiontools.cmake)
+  include(${SURGE_SOURCE_DIR}/cmake/versiontools.cmake)
 endif()
 target_sources(${PROJECT_NAME} PRIVATE ${CMAKE_BINARY_DIR}/geninclude/version.cpp)
 
@@ -307,7 +369,10 @@ target_link_libraries(${PROJECT_NAME}
   sst-plugininfra::tinyxml
   sst-plugininfra::strnatcmp
   sst-filters
+  sst-filters-extras
   sst-waveshapers
+  sst-basic-blocks
+  sst-effects
 
   surge::oddsound-mts
   surge::sqlite

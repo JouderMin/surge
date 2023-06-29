@@ -1,20 +1,24 @@
 /*
-** Portable (using standard fread and so on) support for .wav files generating wavetables
-**
-** Two things which matter in addition to the fmt and data block
-**
-**  1. The 'smpl' block
-**  2. The 'clm ' block - indicates a serum file
-**  3. The 'cue ' block which apparently NI uses
-**
-** I read them in this order:
-**
-**  1. If there is a clm block that wins, we ignore the smpl and cue block, and you get your 2048 wt
-**  2. If there is a cue block and no clm, use the offsets if they are power of 2 and regular
-**  3. Else if there is no smpl block or you have a smpl block with a power of 2 sample length we
-**     interpret you as a wt
-**  4. otherwise as a one shot or - right now - an error
-*/
+ * Surge XT - a free and open source hybrid synthesizer,
+ * built by Surge Synth Team
+ *
+ * Learn more at https://surge-synthesizer.github.io/
+ *
+ * Copyright 2018-2023, various authors, as described in the GitHub
+ * transaction log.
+ *
+ * Surge XT is released under the GNU General Public Licence v3
+ * or later (GPL-3.0-or-later). The license is found in the "LICENSE"
+ * file in the root of this repository, or at
+ * https://www.gnu.org/licenses/gpl-3.0.en.html
+ *
+ * Surge was a commercial product from 2004-2018, copyright and ownership
+ * held by Claes Johanson at Vember Audio during that period.
+ * Claes made Surge open source in September 2018.
+ *
+ * All source for Surge XT is available at
+ * https://github.com/surge-synthesizer/surge
+ */
 
 #define WAV_STDOUT_INFO 0
 
@@ -83,7 +87,7 @@ bool SurgeStorage::load_wt_wav_portable(std::string fn, Wavetable *wt)
     }
 
     // WAV HEADER
-    unsigned short audioFormat, numChannels;
+    unsigned short audioFormat, numChannels{1};
     unsigned int sampleRate, byteRate;
     unsigned short blockAlign, bitsPerSample;
 
@@ -100,8 +104,8 @@ bool SurgeStorage::load_wt_wav_portable(std::string fn, Wavetable *wt)
 
     // Now start reading chunks
     int tbr = 4;
-    char *wavdata = nullptr;
-    int datasz = 0, datasamples;
+    char *wavdata{nullptr};
+    int datasz{0}, datasamples{0};
 
     while (true)
     {
@@ -350,7 +354,15 @@ bool SurgeStorage::load_wt_wav_portable(std::string fn, Wavetable *wt)
     bool loopData = hasSMPL || hasCLM || hasSRGE;
     int loopLen =
         hasCLM ? clmLEN : (hasCUE ? cueLEN : (hasSRGE ? srgeLEN : (hasSMPL ? smplLEN : -1)));
+    bool fullRange = false;
 
+    if (loopLen == -1 && wt->frame_size_if_absent > 0)
+    {
+        loopLen = wt->frame_size_if_absent;
+        loopData = true;
+        fullRange = true;
+        wt->frame_size_if_absent = -1;
+    }
     if (loopLen == 0)
     {
         std::ostringstream oss;
@@ -494,6 +506,10 @@ bool SurgeStorage::load_wt_wav_portable(std::string fn, Wavetable *wt)
 
     if (wavdata && wt)
     {
+        if (fullRange && (wh.flags & wtf_int16))
+        {
+            wh.flags |= wtf_int16_is_16;
+        }
         if (numChannels == 1)
         {
             waveTableDataMutex.lock();

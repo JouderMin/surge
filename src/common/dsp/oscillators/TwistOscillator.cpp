@@ -1,17 +1,24 @@
 /*
-** Surge Synthesizer is Free and Open Source Software
-**
-** Surge is made available under the Gnu General Public License, v3.0
-** https://www.gnu.org/licenses/gpl-3.0.en.html
-**
-** Copyright 2004-2020 by various individuals as described by the Git transaction log
-**
-** All source at: https://github.com/surge-synthesizer/surge.git
-**
-** Surge was a commercial product from 2004-2018, with Copyright and ownership
-** in that period held by Claes Johanson at Vember Audio. Claes made Surge
-** open source in September 2018.
-*/
+ * Surge XT - a free and open source hybrid synthesizer,
+ * built by Surge Synth Team
+ *
+ * Learn more at https://surge-synthesizer.github.io/
+ *
+ * Copyright 2018-2023, various authors, as described in the GitHub
+ * transaction log.
+ *
+ * Surge XT is released under the GNU General Public Licence v3
+ * or later (GPL-3.0-or-later). The license is found in the "LICENSE"
+ * file in the root of this repository, or at
+ * https://www.gnu.org/licenses/gpl-3.0.en.html
+ *
+ * Surge was a commercial product from 2004-2018, copyright and ownership
+ * held by Claes Johanson at Vember Audio during that period.
+ * Claes made Surge open source in September 2018.
+ *
+ * All source for Surge XT is available at
+ * https://github.com/surge-synthesizer/surge
+ */
 
 #include "TwistOscillator.h"
 #include "DebugHelpers.h"
@@ -26,10 +33,6 @@
 #include "plaits/dsp/voice.h"
 
 #include "samplerate.h"
-
-#if SAMPLERATE_LANCZOS
-#include "LanczosResampler.h"
-#endif
 
 std::string twist_engine_name(int i)
 {
@@ -176,7 +179,7 @@ static struct EngineDynamicBipolar : public ParameterDynamicBoolFunction
         engineBipolars.push_back({true, false, false, true});  // Analog Hi-Hat
     }
 
-    const bool getValue(const Parameter *p) const override
+    bool getValue(const Parameter *p) const override
     {
         auto oscs = &(p->storage->getPatch().scene[p->scene - 1].osc[p->ctrlgroup_entry]);
 
@@ -259,7 +262,7 @@ static struct EngineDynamicDeact : public ParameterDynamicDeactivationFunction
 {
     EngineDynamicDeact() noexcept {}
 
-    const bool getValue(const Parameter *p) const override
+    bool getValue(const Parameter *p) const override
     {
         auto oscs = &(p->storage->getPatch().scene[p->scene - 1].osc[p->ctrlgroup_entry]);
         return oscs->p[TwistOscillator::twist_lpg_response].deactivated;
@@ -277,7 +280,8 @@ TwistOscillator::TwistOscillator(SurgeStorage *storage, OscillatorStorage *oscda
     : Oscillator(storage, oscdata, localcopy), charFilt(storage)
 {
 #if SAMPLERATE_LANCZOS
-    lancRes = std::make_unique<LanczosResampler>(48000, storage->dsamplerate_os);
+    lancRes = std::make_unique<sst::basic_blocks::dsp::LanczosResampler<BLOCK_SIZE>>(
+        48000, storage->dsamplerate_os);
     srcstate = nullptr;
 #else
     int error;
@@ -291,7 +295,6 @@ TwistOscillator::TwistOscillator(SurgeStorage *storage, OscillatorStorage *oscda
     voice = std::make_unique<plaits::Voice>();
     shared_buffer = new char[16384];
     alloc = std::make_unique<stmlib::BufferAllocator>(shared_buffer, 16384);
-    voice->Init(alloc.get());
     patch = std::make_unique<plaits::Patch>();
     mod = std::make_unique<plaits::Modulations>();
 
@@ -307,7 +310,7 @@ TwistOscillator::TwistOscillator(SurgeStorage *storage, OscillatorStorage *oscda
 float TwistOscillator::tuningAwarePitch(float pitch)
 {
     if (storage->tuningApplicationMode == SurgeStorage::RETUNE_ALL &&
-        !(storage->oddsound_mts_client && storage->oddsound_mts_active) &&
+        !(storage->oddsound_mts_client && storage->oddsound_mts_active_as_client) &&
         !(storage->isStandardTuning))
     {
         auto idx = (int)floor(pitch);
@@ -321,6 +324,8 @@ float TwistOscillator::tuningAwarePitch(float pitch)
 
 void TwistOscillator::init(float pitch, bool is_display, bool nonzero_drift)
 {
+    voice->Init(alloc.get());
+
     charFilt.init(storage->getPatch().character.val.i);
 
     float tpitch = tuningAwarePitch(pitch);
@@ -375,19 +380,28 @@ void TwistOscillator::process_block_internal(float pitch, float drift, bool ster
 
     auto driftv = driftLFO.next();
     patch->note = pitch + drift * driftv;
-    patch->engine = localcopy[oscdata->p[twist_engine].param_id_in_scene].i;
+    patch->engine = oscdata->p[twist_engine].val.i;
 
-    harm.newValue(fvbp(twist_harmonics));
-    timb.newValue(fvbp(twist_timbre));
-    morph.newValue(fvbp(twist_morph));
-    lpgcol.newValue(fv(twist_lpg_response));
-    lpgdec.newValue(fv(twist_lpg_decay));
+    harm.newValue(limit_range(fvbp(twist_harmonics), -1.f, 1.f));
+    timb.newValue(limit_range(fvbp(twist_timbre), -1.f, 1.f));
+    morph.newValue(limit_range(fvbp(twist_morph), -1.f, 1.f));
+    lpgcol.newValue(limit_range(fv(twist_lpg_response), 0.f, 1.f));
+    lpgdec.newValue(limit_range(fv(twist_lpg_decay), 0.f, 1.f));
     auxmix.newValue(limit_range(fvbp(twist_aux_mix), -1.f, 1.f));
 
     bool lpgIsOn = !oscdata->p[twist_lpg_response].deactivated;
 
-    constexpr int max_subblock = 4;
-    int subblock = (lpgIsOn || FM) ? 1 : max_subblock;
+    // The LPG in surge 1.1 is wrong because it doesn't use the correct vlock
+    // size. This code allows you to optionally correct that while retaining legacy.
+    // See #6760 for more.
+    constexpr int max_subblock = 12; // This is the internal block size PLAITS uses
+
+    // This setting is *incorrect* but retains legacy surge XT 1.1 behavior
+    int subblock = (lpgIsOn || FM) ? 1 : 4; // retain surge legacy
+
+    // This setting allows us to correct it in VCV Rack.
+    if (lpgIsOn && useCorrectLPGBlockSize)
+        subblock = 12;
 #if SAMPLERATE_SRC
     float src_in[subblock][2];
     float src_out[BLOCK_SIZE_OS][2];

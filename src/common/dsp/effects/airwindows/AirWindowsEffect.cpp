@@ -1,6 +1,30 @@
+/*
+ * Surge XT - a free and open source hybrid synthesizer,
+ * built by Surge Synth Team
+ *
+ * Learn more at https://surge-synthesizer.github.io/
+ *
+ * Copyright 2018-2023, various authors, as described in the GitHub
+ * transaction log.
+ *
+ * Surge XT is released under the GNU General Public Licence v3
+ * or later (GPL-3.0-or-later). The license is found in the "LICENSE"
+ * file in the root of this repository, or at
+ * https://www.gnu.org/licenses/gpl-3.0.en.html
+ *
+ * Surge was a commercial product from 2004-2018, copyright and ownership
+ * held by Claes Johanson at Vember Audio during that period.
+ * Claes made Surge open source in September 2018.
+ *
+ * All source for Surge XT is available at
+ * https://github.com/surge-synthesizer/surge
+ */
 #include "AirWindowsEffect.h"
 #include "UserDefaults.h"
 #include "DebugHelpers.h"
+
+#include "sst/basic-blocks/mechanics/block-ops.h"
+namespace mech = sst::basic_blocks::mechanics;
 
 constexpr int subblock_factor = 3; // divide block by 2^this
 
@@ -185,7 +209,7 @@ void AirWindowsEffect::process(float *dataL, float *dataR)
         hasInvalidated = true;
     }
 
-    if (!airwin || *(pdata_ival[0]) != lastSelected || fxdata->p[0].user_data == nullptr)
+    if (!airwin || fxdata->p[0].val.i != lastSelected || fxdata->p[0].user_data == nullptr)
     {
         /*
         ** So do we want to let Airwindows set params as defaults or do we want
@@ -203,7 +227,7 @@ void AirWindowsEffect::process(float *dataL, float *dataR)
         {
             useStreamedValues = true;
         }
-        setupSubFX(*(pdata_ival[0]), useStreamedValues);
+        setupSubFX(fxdata->p[0].val.i, useStreamedValues);
     }
 
     if (!airwin)
@@ -228,7 +252,7 @@ void AirWindowsEffect::process(float *dataL, float *dataR)
     {
         for (int i = 0; i < airwin->paramCount && i < n_fx_params - 1; ++i)
         {
-            param_lags[i].newValue(clamp01(*f[i + 1]));
+            param_lags[i].newValue(clamp01(*pd_float[i + 1]));
             if (fxdata->p[i + 1].ctrltype == ct_airwindows_param_integral)
             {
                 airwin->setParameter(i, fxdata->p[i + 1].get_value_f01());
@@ -251,8 +275,8 @@ void AirWindowsEffect::process(float *dataL, float *dataR)
         airwin->processReplacing(in, out, QBLOCK);
     }
 
-    copy_block(outL, dataL, BLOCK_SIZE_QUAD);
-    copy_block(outR, dataR, BLOCK_SIZE_QUAD);
+    mech::copy_from_to<BLOCK_SIZE>(outL, dataL);
+    mech::copy_from_to<BLOCK_SIZE>(outR, dataR);
 }
 
 void AirWindowsEffect::setupSubFX(int sfx, bool useStreamedValues)

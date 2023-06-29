@@ -1,17 +1,24 @@
 /*
-** Surge Synthesizer is Free and Open Source Software
-**
-** Surge is made available under the Gnu General Public License, v3.0
-** https://www.gnu.org/licenses/gpl-3.0.en.html
-**
-** Copyright 2004-2021 by various individuals as described by the Git transaction log
-**
-** All source at: https://github.com/surge-synthesizer/surge.git
-**
-** Surge was a commercial product from 2004-2018, with Copyright and ownership
-** in that period held by Claes Johanson at Vember Audio. Claes made Surge
-** open source in September 2018.
-*/
+ * Surge XT - a free and open source hybrid synthesizer,
+ * built by Surge Synth Team
+ *
+ * Learn more at https://surge-synthesizer.github.io/
+ *
+ * Copyright 2018-2023, various authors, as described in the GitHub
+ * transaction log.
+ *
+ * Surge XT is released under the GNU General Public Licence v3
+ * or later (GPL-3.0-or-later). The license is found in the "LICENSE"
+ * file in the root of this repository, or at
+ * https://www.gnu.org/licenses/gpl-3.0.en.html
+ *
+ * Surge was a commercial product from 2004-2018, copyright and ownership
+ * held by Claes Johanson at Vember Audio during that period.
+ * Claes made Surge open source in September 2018.
+ *
+ * All source for Surge XT is available at
+ * https://github.com/surge-synthesizer/surge
+ */
 
 // This oscillator is intentionally bad! Not recommended as an example of good DSP!
 
@@ -67,7 +74,7 @@ void AliasOscillator::init(float pitch, bool is_display, bool nonzero_init_drift
         }
     }
 
-    n_unison = is_display ? 1 : localcopy[oscdata->p[ao_unison_voices].param_id_in_scene].i;
+    n_unison = is_display ? 1 : oscdata->p[ao_unison_voices].val.i;
 
     auto us = Surge::Oscillator::UnisonSetup<float>(n_unison);
 
@@ -153,7 +160,7 @@ void AliasOscillator::process_block_internal(const float pitch, const float drif
     case AliasOscillator::ao_waves::aow_audiobuffer:
         // TODO: correct size check here.
         // should really check BLOCK_SIZE_OS etc, make sure everything is as expected
-        static_assert(sizeof(storage->audio_in) > 0xFF,
+        static_assert(sizeof(storage->audio_in) >= 2 * BLOCK_SIZE_OS * sizeof(float),
                       "Memory region not large enough to be indexed by Alias");
 
         wavetable_mode = true;
@@ -261,12 +268,9 @@ void AliasOscillator::process_block_internal(const float pitch, const float drif
 
     const bool ramp_unmasked_after_threshold = (bool)oscdata->p[ao_mask].deform_type;
 
-    // clang-format off
-    // I don't know why the pipeline behaves differently?
     const uint8_t threshold =
         (uint8_t)((float)bit_mask *
                   clamp01(localcopy[oscdata->p[ao_threshold].param_id_in_scene].f));
-    // clang-format on
 
     const double two32 = 4294967296.0;
 
@@ -411,7 +415,7 @@ void AliasOscillator::process_block(float pitch, float drift, bool stereo, bool 
     const float crush_bits =
         limit_range(localcopy[oscdata->p[ao_bit_depth].param_id_in_scene].f, 1.f, 8.f);
 
-    const ao_waves wavetype = (ao_waves)localcopy[oscdata->p[ao_wave].param_id_in_scene].i;
+    const ao_waves wavetype = (ao_waves)oscdata->p[ao_wave].val.i;
 
 #define P(m)                                                                                       \
     case m:                                                                                        \

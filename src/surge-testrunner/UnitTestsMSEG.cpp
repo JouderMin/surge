@@ -1,12 +1,34 @@
+/*
+ * Surge XT - a free and open source hybrid synthesizer,
+ * built by Surge Synth Team
+ *
+ * Learn more at https://surge-synthesizer.github.io/
+ *
+ * Copyright 2018-2023, various authors, as described in the GitHub
+ * transaction log.
+ *
+ * Surge XT is released under the GNU General Public Licence v3
+ * or later (GPL-3.0-or-later). The license is found in the "LICENSE"
+ * file in the root of this repository, or at
+ * https://www.gnu.org/licenses/gpl-3.0.en.html
+ *
+ * Surge was a commercial product from 2004-2018, copyright and ownership
+ * held by Claes Johanson at Vember Audio during that period.
+ * Claes made Surge open source in September 2018.
+ *
+ * All source for Surge XT is available at
+ * https://github.com/surge-synthesizer/surge
+ */
 #include <iostream>
 #include <iomanip>
 #include <sstream>
 #include <algorithm>
 
 #include "HeadlessUtils.h"
-#include "catch2/catch2.hpp"
-#include "FastMath.h"
+#include "catch2/catch_amalgamated.hpp"
 #include "MSEGModulationHelper.h"
+
+using namespace Catch;
 
 struct msegObservation
 {
@@ -128,7 +150,7 @@ TEST_CASE("Basic MSEG Evaluation", "[mseg]")
         for (auto c : runIt)
         {
             auto dbphase = (int)(2 * c.phase) % 3;
-            INFO("phase is " << c.phase << " " << dbphase)
+            INFO("phase is " << c.phase << " " << dbphase);
             if (dbphase == 0)
                 REQUIRE(c.v == 1);
             if (dbphase == 1 || dbphase == 2)
@@ -137,7 +159,7 @@ TEST_CASE("Basic MSEG Evaluation", "[mseg]")
     }
 }
 
-TEST_CASE("Unlocked Endpoitns", "[mseg]")
+TEST_CASE("Unlocked Endpoints", "[mseg]")
 {
     SECTION("Simple Square Default Locks")
     {
@@ -170,7 +192,7 @@ TEST_CASE("Unlocked Endpoitns", "[mseg]")
         }
     }
 
-    SECTION("Free Endpoint is a Square")
+    SECTION("Free Endpoint Is a Square")
     {
         MSEGStorage ms;
         ms.n_activeSegments = 3;
@@ -203,9 +225,9 @@ TEST_CASE("Unlocked Endpoitns", "[mseg]")
     }
 }
 
-TEST_CASE("Deform per Segment", "[mseg]")
+TEST_CASE("Deform Per Segment", "[mseg]")
 {
-    SECTION("Triangle with Deform")
+    SECTION("Triangle With Deform")
     {
         MSEGStorage ms;
         ms.n_activeSegments = 2;
@@ -253,7 +275,7 @@ TEST_CASE("Deform per Segment", "[mseg]")
     }
 }
 
-TEST_CASE("OneShot vs Loop", "[mseg]")
+TEST_CASE("Oneshot vs Loop", "[mseg]")
 {
     SECTION("Triangle Loop")
     {
@@ -287,7 +309,7 @@ TEST_CASE("OneShot vs Loop", "[mseg]")
         {
             if (c.phase < 1)
             {
-                INFO("At " << c.fPhase << " Value is " << c.v << " " << c.phase)
+                INFO("At " << c.fPhase << " Value is " << c.v << " " << c.phase);
                 if (c.fPhase < 0.5)
                     REQUIRE(c.v == Approx(2 * c.fPhase / 0.5 - 1));
                 if (c.fPhase > 0.5)
@@ -303,7 +325,7 @@ TEST_CASE("OneShot vs Loop", "[mseg]")
 
 TEST_CASE("Loop Test Cases", "[mseg]")
 {
-    SECTION("Non-Gated Loop over a Ramp Pair")
+    SECTION("Non-Gated Loop Over a Ramp Pair")
     {
         // This is an attack up from -1 over 0.5, then a ramp in 0,1and we loop over the end
         MSEGStorage ms;
@@ -351,7 +373,7 @@ TEST_CASE("Loop Test Cases", "[mseg]")
         }
     }
 
-    SECTION("Gated Loop over a Ramp")
+    SECTION("Gated Loop Over a Ramp")
     {
         // This is an attack up from -1 over 0.5, then a ramp in 0,1and we loop over the end
         MSEGStorage ms;
@@ -434,7 +456,7 @@ TEST_CASE("Loop Test Cases", "[mseg]")
     }
 }
 
-TEST_CASE("Zero size loops", "[mseg]")
+TEST_CASE("Zero Size Loops", "[mseg]")
 {
     SECTION("Zero Size Non Gated")
     {
@@ -524,7 +546,7 @@ TEST_CASE("Zero size loops", "[mseg]")
  * Tests to add
  * - loop point 0 (start = end + 1)
  * - loop start at 0
- * - maniulation routines
+ * - manipulation routines
  *    - insert
  *    - delete
  *    - split

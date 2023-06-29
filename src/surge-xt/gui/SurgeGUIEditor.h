@@ -1,19 +1,27 @@
 /*
-** Surge Synthesizer is Free and Open Source Software
-**
-** Surge is made available under the Gnu General Public License, v3.0
-** https://www.gnu.org/licenses/gpl-3.0.en.html
-**
-** Copyright 2004-2020 by various individuals as described by the Git transaction log
-**
-** All source at: https://github.com/surge-synthesizer/surge.git
-**
-** Surge was a commercial product from 2004-2018, with Copyright and ownership
-** in that period held by Claes Johanson at Vember Audio. Claes made Surge
-** open source in September 2018.
-*/
+ * Surge XT - a free and open source hybrid synthesizer,
+ * built by Surge Synth Team
+ *
+ * Learn more at https://surge-synthesizer.github.io/
+ *
+ * Copyright 2018-2023, various authors, as described in the GitHub
+ * transaction log.
+ *
+ * Surge XT is released under the GNU General Public Licence v3
+ * or later (GPL-3.0-or-later). The license is found in the "LICENSE"
+ * file in the root of this repository, or at
+ * https://www.gnu.org/licenses/gpl-3.0.en.html
+ *
+ * Surge was a commercial product from 2004-2018, copyright and ownership
+ * held by Claes Johanson at Vember Audio during that period.
+ * Claes made Surge open source in September 2018.
+ *
+ * All source for Surge XT is available at
+ * https://github.com/surge-synthesizer/surge
+ */
 
-#pragma once
+#ifndef SURGE_SRC_SURGE_XT_GUI_SURGEGUIEDITOR_H
+#define SURGE_SRC_SURGE_XT_GUI_SURGEGUIEDITOR_H
 
 #include "globals.h"
 
@@ -77,7 +85,7 @@ namespace Overlays
 struct AboutScreen;
 struct TypeinParamEditor;
 struct MiniEdit;
-
+struct Alert;
 struct OverlayWrapper;
 struct PatchStoreDialog;
 } // namespace Overlays
@@ -117,9 +125,12 @@ class SurgeGUIEditor : public Surge::GUI::IComponentTagValue::Listener,
     std::unique_ptr<Surge::Widgets::MainFrame> frame;
 
     std::atomic<int> errorItemCount{0};
-    std::vector<std::pair<std::string, std::string>> errorItems;
+    std::vector<std::tuple<std::string, std::string, SurgeStorage::ErrorType>> errorItems;
     std::mutex errorItemsMutex;
-    void onSurgeError(const std::string &msg, const std::string &title) override;
+    void onSurgeError(const std::string &msg, const std::string &title,
+                      const SurgeStorage::ErrorType &type) override;
+
+    std::atomic<bool> audioLatencyNotified{false};
 
     static int start_paramtag_value;
 
@@ -127,6 +138,8 @@ class SurgeGUIEditor : public Surge::GUI::IComponentTagValue::Listener,
     int slowIdleCounter{0};
     bool queue_refresh;
     virtual void toggle_mod_editing();
+
+    void forceLFODisplayRebuild();
 
     static long applyParameterOffset(long index);
     static long unapplyParameterOffset(long index);
@@ -166,9 +179,9 @@ class SurgeGUIEditor : public Surge::GUI::IComponentTagValue::Listener,
 
   protected:
     virtual void setParameter(long index, float value);
-
     // listener class
     void valueChanged(Surge::GUI::IComponentTagValue *control) override;
+
     int32_t controlModifierClicked(Surge::GUI::IComponentTagValue *control,
                                    const juce::ModifierKeys &button,
                                    bool isDoubleClickEvent) override;
@@ -232,6 +245,7 @@ class SurgeGUIEditor : public Surge::GUI::IComponentTagValue::Listener,
     uint64_t lastObservedMidiNoteEventCount{0};
 
     modsources getSelectedModsource() { return modsource; }
+    void setModsourceSelected(modsources ms, int ms_idx = 0);
 
   private:
     void openOrRecreateEditor();
@@ -248,7 +262,9 @@ class SurgeGUIEditor : public Surge::GUI::IComponentTagValue::Listener,
     int fxbypass_tag = 0, f1subtypetag = 0, f2subtypetag = 0, filterblock_tag = 0, fmconfig_tag = 0;
     double lastTempo = 0;
     int lastTSNum = 0, lastTSDen = 0;
+    int lastOverlayRefresh = 0;
     void adjustSize(float &width, float &height) const;
+    void initOSCError(int port);
 
     struct patchdata
     {
@@ -334,6 +350,9 @@ class SurgeGUIEditor : public Surge::GUI::IComponentTagValue::Listener,
     }
 
     std::string midiMappingToHtml();
+    std::string parametersToHtml();
+
+    std::string patchToHtml(bool includeDefaults = false);
 
     // These are unused right now
     enum SkinInspectorFlags
@@ -372,6 +391,7 @@ class SurgeGUIEditor : public Surge::GUI::IComponentTagValue::Listener,
         TUNING_EDITOR,
         WAVESHAPER_ANALYZER,
         FILTER_ANALYZER,
+        OSCILLOSCOPE,
         KEYBINDINGS_EDITOR,
         ACTION_HISTORY,
 
@@ -443,6 +463,7 @@ class SurgeGUIEditor : public Surge::GUI::IComponentTagValue::Listener,
     std::string getDisplayForTag(long tag, bool external = false, float value = 0);
     float getF01FromString(long tag, const std::string &s);
     float getModulationF01FromString(long tag, const std::string &s);
+    std::string getAccessibleModulationVoiceover(long tag);
 
     void queuePatchFileLoad(const std::string &file)
     {
@@ -470,6 +491,7 @@ class SurgeGUIEditor : public Surge::GUI::IComponentTagValue::Listener,
 
     std::deque<std::pair<std::string, int>> accAnnounceStrings;
     void enqueueAccessibleAnnouncement(const std::string &s);
+    void announceGuiState();
     void setAccessibilityInformationByParameter(juce::Component *c, Parameter *p,
                                                 const std::string &action);
 
@@ -597,7 +619,7 @@ class SurgeGUIEditor : public Surge::GUI::IComponentTagValue::Listener,
     /*
      * Favorites support
      */
-    void setPatchAsFavorite(bool b);
+    void setPatchAsFavorite(const std::string &pname, bool b);
     bool isPatchFavorite();
     bool isPatchUser();
 
@@ -622,9 +644,9 @@ class SurgeGUIEditor : public Surge::GUI::IComponentTagValue::Listener,
     SurgePatch &getPatch() { return synth->storage.getPatch(); }
     SurgeStorage *getStorage() { return &(synth->storage); }
 
-  private:
     std::unique_ptr<Surge::Widgets::EffectChooser> effectChooser;
 
+  private:
     Surge::GUI::IComponentTagValue *statusMPE = nullptr, *statusTune = nullptr,
                                    *statusZoom = nullptr, *actionUndo = nullptr,
                                    *actionRedo = nullptr;
@@ -660,7 +682,8 @@ class SurgeGUIEditor : public Surge::GUI::IComponentTagValue::Listener,
     juce::Component *mpeStatus{nullptr}, *zoomStatus{nullptr}, *tuneStatus{nullptr},
         *mainMenu{nullptr}, *lfoMenuButton{nullptr}, *undoButton{nullptr}, *redoButton{nullptr},
         *lfoRateSlider{nullptr};
-
+    Surge::Widgets::ModulatableControlInterface *filterCutoffSlider[2]{nullptr, nullptr},
+        *filterResonanceSlider[2]{nullptr, nullptr};
     /*
      * This is the JUCE component management
      */
@@ -775,11 +798,20 @@ class SurgeGUIEditor : public Surge::GUI::IComponentTagValue::Listener,
     juce::PopupMenu makePatchDefaultsMenu(const juce::Point<int> &rect);
     juce::PopupMenu makeValueDisplaysMenu(const juce::Point<int> &rect);
     juce::PopupMenu makeWorkflowMenu(const juce::Point<int> &rect);
+    juce::PopupMenu makeAccesibilityMenu(const juce::Point<int> &rect);
     juce::PopupMenu makeDataMenu(const juce::Point<int> &rect);
     juce::PopupMenu makeMidiMenu(const juce::Point<int> &rect);
     juce::PopupMenu makeDevMenu(const juce::Point<int> &rect);
     juce::PopupMenu makeLfoMenu(const juce::Point<int> &rect);
     juce::PopupMenu makeMonoModeOptionsMenu(const juce::Point<int> &rect, bool updateDefaults);
+
+#if SURGE_HAS_OSC
+    juce::PopupMenu makeOSCMenu(const juce::Point<int> &where);
+#endif
+
+    void makeScopeEntry(juce::PopupMenu &menu);
+
+    void setRecommendedAccessibility();
 
   public:
     void addHelpHeaderTo(const std::string &lab, const std::string &hu, juce::PopupMenu &m) const;
@@ -796,9 +828,32 @@ class SurgeGUIEditor : public Surge::GUI::IComponentTagValue::Listener,
     void setUseKeyboardShortcuts(bool b);
     void toggleUseKeyboardShortcuts();
 
-    std::unique_ptr<juce::AlertWindow> okcWithToggleAlertWindow;
-    std::unique_ptr<juce::ToggleButton> okcWithToggleToggleButton;
-    std::function<void()> okcWithToggleCallback;
+    enum AlertButtonStyle
+    {
+        OK_CANCEL,
+        YES_NO,
+        OK
+    };
+
+    void alertBox(const std::string &title, const std::string &prompt, std::function<void()> onOk,
+                  std::function<void()> onCancel, AlertButtonStyle buttonStyle);
+
+    void alertOKCancel(const std::string &title, const std::string &prompt,
+                       std::function<void()> onOk, std::function<void()> onCancel = nullptr)
+    {
+        alertBox(title, prompt, onOk, onCancel, AlertButtonStyle::OK_CANCEL);
+    }
+    void alertYesNo(const std::string &title, const std::string &prompt, std::function<void()> onOk,
+                    std::function<void()> onCancel = nullptr)
+    {
+        alertBox(title, prompt, onOk, onCancel, AlertButtonStyle::YES_NO);
+    }
+    void messageBox(const std::string &title, const std::string &prompt)
+    {
+        alertBox(title, prompt, nullptr, nullptr, AlertButtonStyle::OK);
+    }
+
+    std::unique_ptr<Surge::Overlays::Alert> alert;
 
     enum AskAgainStates
     {
@@ -811,7 +866,8 @@ class SurgeGUIEditor : public Surge::GUI::IComponentTagValue::Listener,
     bool promptForOKCancelWithDontAskAgain(const ::std::string &title, const std::string &msg,
                                            Surge::Storage::DefaultKey dontAskAgainKey,
                                            std::function<void()> okCallback,
-                                           std::string ynMessage = "Don't ask me again");
+                                           std::string ynMessage = "Don't ask me again",
+                                           AskAgainStates askAgainDefault = DUNNO);
 
   private:
     bool scannedForMidiPresets = false;
@@ -994,3 +1050,5 @@ class SurgeGUIEditor : public Surge::GUI::IComponentTagValue::Listener,
                                            "Control 126 Mono Mode Off",
                                            "Control 127 Mono Mode On"};
 };
+
+#endif // SURGE_SRC_SURGE_XT_GUI_SURGEGUIEDITOR_H

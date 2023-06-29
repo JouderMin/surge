@@ -1,17 +1,24 @@
 /*
-** Surge Synthesizer is Free and Open Source Software
-**
-** Surge is made available under the Gnu General Public License, v3.0
-** https://www.gnu.org/licenses/gpl-3.0.en.html
-**
-** Copyright 2004-2021 by various individuals as described by the Git transaction log
-**
-** All source at: https://github.com/surge-synthesizer/surge.git
-**
-** Surge was a commercial product from 2004-2018, with Copyright and ownership
-** in that period held by Claes Johanson at Vember Audio. Claes made Surge
-** open source in September 2018.
-*/
+ * Surge XT - a free and open source hybrid synthesizer,
+ * built by Surge Synth Team
+ *
+ * Learn more at https://surge-synthesizer.github.io/
+ *
+ * Copyright 2018-2023, various authors, as described in the GitHub
+ * transaction log.
+ *
+ * Surge XT is released under the GNU General Public Licence v3
+ * or later (GPL-3.0-or-later). The license is found in the "LICENSE"
+ * file in the root of this repository, or at
+ * https://www.gnu.org/licenses/gpl-3.0.en.html
+ *
+ * Surge was a commercial product from 2004-2018, copyright and ownership
+ * held by Claes Johanson at Vember Audio during that period.
+ * Claes made Surge open source in September 2018.
+ *
+ * All source for Surge XT is available at
+ * https://github.com/surge-synthesizer/surge
+ */
 
 #include "WindowOscillator.h"
 #include "DSPUtils.h"
@@ -19,7 +26,7 @@
 #include <cstdint>
 #include "DebugHelpers.h"
 
-#ifdef _MSC_VER
+#ifdef _WIN32
 #include <intrin.h>
 #else
 namespace
@@ -62,8 +69,7 @@ void WindowOscillator::init(float pitch, bool is_display, bool nonzero_init_drif
     l_morph.setRate(0.05);
     update_lagvals<true>();
 
-    NumUnison = limit_range(localcopy[oscdata->p[win_unison_voices].param_id_in_scene].i, 1,
-                            MAX_UNISON - 1);
+    NumUnison = limit_range(oscdata->p[win_unison_voices].val.i, 1, MAX_UNISON - 1);
 
     if (is_display)
     {
@@ -158,7 +164,7 @@ void WindowOscillator::init_ctrltypes()
     oscdata->p[win_unison_detune].set_name("Unison Detune");
     oscdata->p[win_unison_detune].set_type(ct_oscspread);
     oscdata->p[win_unison_voices].set_name("Unison Voices");
-    oscdata->p[win_unison_voices].set_type(ct_osccountWT);
+    oscdata->p[win_unison_voices].set_type(ct_osccount);
 }
 
 void WindowOscillator::init_default_values()
@@ -196,8 +202,7 @@ void WindowOscillator::ProcessWindowOscs(bool stereo, bool FM)
     unsigned int SizeMask = (oscdata->wt.size << 16) - 1;
     unsigned int SizeMaskWin = (storage->WindowWT.size << 16) - 1;
 
-    unsigned char SelWindow =
-        limit_range(localcopy[oscdata->p[win_window].param_id_in_scene].i, 0, 8);
+    unsigned char SelWindow = limit_range(oscdata->p[win_window].val.i, 0, 8);
 
     int Table = limit_range((int)(float)(oscdata->wt.n_tables * l_morph.v), 0,
                             (int)oscdata->wt.n_tables - 1);

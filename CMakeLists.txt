@@ -2,8 +2,9 @@
 cmake_minimum_required(VERSION 3.15)
 cmake_policy(SET CMP0091 NEW)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
-set(CMAKE_OSX_DEPLOYMENT_TARGET 10.11 CACHE STRING "Minimum macOS version")
+set(CMAKE_OSX_DEPLOYMENT_TARGET 10.9 CACHE STRING "Minimum macOS version")
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "Release" CACHE STRING "" FORCE)
@@ -13,7 +14,7 @@ if(NOT BUILD_TESTING)
   option(BUILD_TESTING "" OFF)
 endif()
 
-project(Surge VERSION 1.1.0 LANGUAGES C CXX ASM)
+project(Surge VERSION 1.3.0 LANGUAGES C CXX ASM)
 
 # Banner {{{
 message(STATUS "It's Surge XT, folks! Version is ${PROJECT_VERSION}")
@@ -25,12 +26,33 @@ message(STATUS "Targeting ${SURGE_BITNESS}-bit configuration")
 # }}}
 
 # Make Sure the REpo is properly cloned {{{
-if (NOT EXISTS "${CMAKE_SOURCE_DIR}/libs/tuning-library/README.md")
-  message(FATAL_ERROR "Cannot find the contents of the tuning-library submodule, but this usually means"
-          " that you haven't done a git submodule update; and so your repo will not build properly. "
-          "To resolve this, please run `git submodule update --init --recursive` and re-run cmake")
+set(SURGE_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR})
+if (NOT EXISTS "${SURGE_SOURCE_DIR}/libs/tuning-library/README.md")
+  message(FATAL_ERROR "Cannot find the contents of the tuning-library submodule. This usually means"
+          " that you haven't done a submodule update, so the repository will not build properly. "
+          "To resolve this, please run `git submodule update --init --recursive` and re-run CMake!")
 endif()
 
+# }}}
+
+# Fail on 32 bit except on windows {{{
+if (${CMAKE_SIZEOF_VOID_P} EQUAL 4)
+  if (WIN32)
+    message(STATUS "Windows 32 bit build is lightly tested")
+  else()
+    # If you hit this error and want to try and do a 32 bit build on your Linux variant
+    # most likely you will need to conditionally ifdef out the Spring Reverb and a few
+    # things. We would happily merge that conditional compilation. The straztegy is basically
+    # add a 'is 32 bit linux' compile flag to surge common, use that to make the SpringReverb
+    # a nullptr in Effects.cpp and skipped code in the C++, test. etc... The branch where you
+    # can add this flag is where we add the -msse2 flag in the GNU/CLang branch below, to get
+    # started
+    message(WARNING "32 Bit Builds are only available on Windows.")
+    message(WARNING "If you are building on an r-pi, install a 64 bit OS.")
+    message(WARNING "If you want to help fix this, see the comment in CMakeLists.txt.")
+    message(FATAL_ERROR "Stopping compilation")
+  endif()
+endif()
 # }}}
 
 # Global compiler/linker settings {{{
@@ -44,7 +66,7 @@ endif()
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
   if (${SURGE_SANITIZE})
-    message(STATUS "Sanitizer is On" )
+    message(STATUS "Sanitizer is on" )
   endif()
   # Any Clang or any GCC
   add_compile_options(
@@ -96,6 +118,7 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
   if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     # Any Clang
     add_compile_options(
+      -Wno-unused-command-line-argument
       -Wno-deprecated-declarations
       -Werror=inconsistent-missing-override
       -Werror=logical-op-parentheses
@@ -163,6 +186,13 @@ source_group("Surge XT Juce" REGULAR_EXPRESSION "src/surge-xt/")
 source_group("Surge FX Juce" REGULAR_EXPRESSION "src/surge-fx/")
 # }}}
 
+
+option(SURGE_BUILD_TESTRUNNER "Build Surge unit test runner" ON)
+if (${SURGE_BUILD_TESTRUNNER})
+  message(STATUS "Enabling tests; compile with SURGE_BUILD_TESTRUNNER=OFF to skip")
+  enable_testing()
+endif()
+
 add_subdirectory(resources)
 add_subdirectory(src)
 
@@ -177,7 +207,7 @@ include(cmake/stage-extra-content.cmake)
 add_custom_target(code-quality-pipeline-checks)
 
 # Check 1: The extra content is properly specified.
-add_dependencies(code-quality-pipeline-checks download-extra-content)
+# add_dependencies(code-quality-pipeline-checks download-extra-content)
 
 # Clang Format checks
 set(CLANG_FORMAT_DIRS src)
@@ -190,7 +220,7 @@ endforeach()
 add_custom_command(TARGET code-quality-pipeline-checks
   POST_BUILD
   WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-  COMMAND ${CMAKE_COMMAND} -E echo About to check clang-format
-  COMMAND git ls-files -- ${CLANG_FORMAT_GLOBS} | xargs clang-format --dry-run --Werror
+  COMMAND ${CMAKE_COMMAND} -E echo About to check clang-format using clang-format-12
+  COMMAND git ls-files -- ${CLANG_FORMAT_GLOBS} | xargs clang-format-12 --dry-run --Werror
   )
 # }}}

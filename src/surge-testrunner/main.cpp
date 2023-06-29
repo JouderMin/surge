@@ -1,3 +1,24 @@
+/*
+ * Surge XT - a free and open source hybrid synthesizer,
+ * built by Surge Synth Team
+ *
+ * Learn more at https://surge-synthesizer.github.io/
+ *
+ * Copyright 2018-2023, various authors, as described in the GitHub
+ * transaction log.
+ *
+ * Surge XT is released under the GNU General Public Licence v3
+ * or later (GPL-3.0-or-later). The license is found in the "LICENSE"
+ * file in the root of this repository, or at
+ * https://www.gnu.org/licenses/gpl-3.0.en.html
+ *
+ * Surge was a commercial product from 2004-2018, copyright and ownership
+ * held by Claes Johanson at Vember Audio during that period.
+ * Claes made Surge open source in September 2018.
+ *
+ * All source for Surge XT is available at
+ * https://github.com/surge-synthesizer/surge
+ */
 #include <iostream>
 #include <iomanip>
 #include <sstream>
@@ -15,11 +36,12 @@
  */
 int main(int argc, char **argv)
 {
-    std::cout << "# surge-headless: " << Surge::Build::FullVersionStr
-              << " built: " << Surge::Build::BuildDate << " " << Surge::Build::BuildTime << "\n";
-
     if (argc > 2 && strcmp(argv[1], "--non-test") == 0)
     {
+        std::cout << "# surge-xt-testrunner: " << Surge::Build::FullVersionStr
+                  << " built: " << Surge::Build::BuildDate << " " << Surge::Build::BuildTime
+                  << "\n";
+
         std::cout << "# Running in non-test mode : " << argv[2] << std::endl;
         if (strcmp(argv[2], "--initialize-pdb") == 0)
         {

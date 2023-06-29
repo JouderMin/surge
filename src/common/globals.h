@@ -1,19 +1,27 @@
 /*
-** Surge Synthesizer is Free and Open Source Software
-**
-** Surge is made available under the Gnu General Public License, v3.0
-** https://www.gnu.org/licenses/gpl-3.0.en.html
-**
-** Copyright 2004-2020 by various individuals as described by the Git transaction log
-**
-** All source at: https://github.com/surge-synthesizer/surge.git
-**
-** Surge was a commercial product from 2004-2018, with Copyright and ownership
-** in that period held by Claes Johanson at Vember Audio. Claes made Surge
-** open source in September 2018.
-*/
+ * Surge XT - a free and open source hybrid synthesizer,
+ * built by Surge Synth Team
+ *
+ * Learn more at https://surge-synthesizer.github.io/
+ *
+ * Copyright 2018-2023, various authors, as described in the GitHub
+ * transaction log.
+ *
+ * Surge XT is released under the GNU General Public Licence v3
+ * or later (GPL-3.0-or-later). The license is found in the "LICENSE"
+ * file in the root of this repository, or at
+ * https://www.gnu.org/licenses/gpl-3.0.en.html
+ *
+ * Surge was a commercial product from 2004-2018, copyright and ownership
+ * held by Claes Johanson at Vember Audio during that period.
+ * Claes made Surge open source in September 2018.
+ *
+ * All source for Surge XT is available at
+ * https://github.com/surge-synthesizer/surge
+ */
 
-#pragma once
+#ifndef SURGE_SRC_COMMON_GLOBALS_H
+#define SURGE_SRC_COMMON_GLOBALS_H
 
 #include <math.h>
 #include <stdio.h>
@@ -39,8 +47,12 @@
     (defined(_M_IX86_FP) && _M_IX86_FP >= 2)
 #include <emmintrin.h>
 #else
+#if defined(__arm__) || defined(__aarch64__) || defined(__riscv)
 #define SIMDE_ENABLE_NATIVE_ALIASES
 #include "simde/x86/sse2.h"
+#else
+#error Surge XT requires either X86/SSE2 or ARM architectures.
+#endif
 #endif
 
 #if MAC || LINUX
@@ -52,10 +64,18 @@ static inline int _stricmp(const char *s1, const char *s2) { return strcasecmp(s
 #define _SURGE_STR(x) #x
 #define SURGE_STR(x) _SURGE_STR(x)
 
+#if !defined(SURGE_COMPILE_BLOCK_SIZE)
+#error You must compile with -DSURGE_COMPILE_BLOCK_SIZE=32 (or whatnot)
+#endif
+
+#ifndef SURGE_HAS_OSC
+#define SURGE_HAS_OSC 1
+#endif
+
 const int BASE_WINDOW_SIZE_X = 913;
 const int BASE_WINDOW_SIZE_Y = 569;
 const int NAMECHARS = 64;
-const int BLOCK_SIZE = 32;
+const int BLOCK_SIZE = SURGE_COMPILE_BLOCK_SIZE;
 const int OSC_OVERSAMPLING = 2;
 const int BLOCK_SIZE_OS = OSC_OVERSAMPLING * BLOCK_SIZE;
 const int BLOCK_SIZE_QUAD = BLOCK_SIZE >> 2;
@@ -72,3 +92,7 @@ const int N_OUTPUTS = 2;
 const int N_INPUTS = 2;
 
 const int DEFAULT_POLYLIMIT = 16;
+
+const int DEFAULT_OSC_PORT_IN = 53280;
+const int DEFAULT_OSC_PORT_OUT = 53281;
+#endif // SURGE_SRC_COMMON_GLOBALS_H

@@ -1,7 +1,33 @@
+/*
+ * Surge XT - a free and open source hybrid synthesizer,
+ * built by Surge Synth Team
+ *
+ * Learn more at https://surge-synthesizer.github.io/
+ *
+ * Copyright 2018-2023, various authors, as described in the GitHub
+ * transaction log.
+ *
+ * Surge XT is released under the GNU General Public Licence v3
+ * or later (GPL-3.0-or-later). The license is found in the "LICENSE"
+ * file in the root of this repository, or at
+ * https://www.gnu.org/licenses/gpl-3.0.en.html
+ *
+ * Surge was a commercial product from 2004-2018, copyright and ownership
+ * held by Claes Johanson at Vember Audio during that period.
+ * Claes made Surge open source in September 2018.
+ *
+ * All source for Surge XT is available at
+ * https://github.com/surge-synthesizer/surge
+ */
 #include "LFOModulationSource.h"
 #include <cmath>
 #include "DebugHelpers.h"
 #include "MSEGModulationHelper.h"
+
+#include "sst/basic-blocks/dsp/CorrelatedNoise.h"
+#include "sst/basic-blocks/dsp/Interpolators.h"
+
+namespace sdsp = sst::basic_blocks::dsp;
 
 using namespace std;
 
@@ -77,6 +103,9 @@ void LFOModulationSource::assign(SurgeStorage *storage, LFOStorage *lfo, pdata *
     {
         wf_history[i] = 0.f;
     }
+
+    for (int i = 0; i < 3; ++i)
+        onepoleState[i] = 0.f;
 }
 
 float LFOModulationSource::bend1(float x)
@@ -113,8 +142,8 @@ float LFOModulationSource::bend3(float x)
 void LFOModulationSource::msegEnvelopePhaseAdjustment()
 {
     // If we have an envelope MSEG length above 1 we want phase to span the duration
-    if (localcopy[lfo->shape.param_id_in_scene].i == lt_mseg &&
-        ms->editMode == MSEGStorage::ENVELOPE && ms->totalDuration > 1.0)
+    if (lfo->shape.val.i == lt_mseg && ms->editMode == MSEGStorage::ENVELOPE &&
+        ms->totalDuration > 1.0)
     {
         // extend the phase
         phase *= ms->totalDuration;
@@ -130,8 +159,7 @@ void LFOModulationSource::initPhaseFromStartPhase()
     phase = localcopy[startphase].f;
     phaseInitialized = true;
 
-    if (localcopy[lfo->shape.param_id_in_scene].i == lt_tri && lfo->rate.deactivated &&
-        !lfo->unipolar.val.b)
+    if (lfo->shape.val.i == lt_tri && lfo->rate.deactivated && !lfo->unipolar.val.b)
     {
         phase += 0.25;
     }
@@ -151,7 +179,7 @@ void LFOModulationSource::initPhaseFromStartPhase()
     msegEnvelopePhaseAdjustment();
 }
 
-void LFOModulationSource::attack()
+void LFOModulationSource::attackFrom(float start)
 {
     // For VLFO you don't need this but SLFO get recycled, so you do
     if (!is_display)
@@ -163,6 +191,7 @@ void LFOModulationSource::attack()
     }
 
     env_state = lfoeg_delay;
+    envelopeStart = start;
 
     env_val = 0.f;
     env_phase = 0;
@@ -190,7 +219,7 @@ void LFOModulationSource::attack()
     {
         phase = lfo->start_phase.val.f;
 
-        if (localcopy[lfo->shape.param_id_in_scene].i == lt_stepseq)
+        if (lfo->shape.val.i == lt_stepseq)
         {
             phase = 0.f;
         }
@@ -204,7 +233,7 @@ void LFOModulationSource::attack()
         float phaseslider;
 
         // Use Phase as shuffle-parameter instead
-        if (localcopy[lfo->shape.param_id_in_scene].i == lt_stepseq)
+        if (lfo->shape.val.i == lt_stepseq)
         {
             phaseslider = 0.f;
         }
@@ -224,7 +253,7 @@ void LFOModulationSource::attack()
             phaseslider -= 1.f;
         }
 
-        switch (localcopy[lfo->trigmode.param_id_in_scene].i)
+        switch (lfo->trigmode.val.i)
         {
         case lm_keytrigger:
             phase = phaseslider;
@@ -268,8 +297,8 @@ void LFOModulationSource::attack()
             // And so the total phase is timePassed * rate + phase0
             auto startPhase = phaseslider;
 
-            if (localcopy[lfo->shape.param_id_in_scene].i == lt_mseg &&
-                ms->editMode == MSEGStorage::ENVELOPE && ms->totalDuration > 1.0)
+            if (lfo->shape.val.i == lt_mseg && ms->editMode == MSEGStorage::ENVELOPE &&
+                ms->totalDuration > 1.0)
             {
                 // extend the phase
                 startPhase *= ms->totalDuration;
@@ -295,10 +324,10 @@ void LFOModulationSource::attack()
         };
     }
 
-    switch (localcopy[lfo->shape.param_id_in_scene].i)
+    switch (lfo->shape.val.i)
     {
     case lt_snh:
-        if (isFirstAttack || localcopy[lfo->trigmode.param_id_in_scene].i != lm_freerun)
+        if (isFirstAttack || lfo->trigmode.val.i != lm_freerun)
         {
             noise = 0.f;
             noised1 = 0.f;
@@ -306,12 +335,16 @@ void LFOModulationSource::attack()
 
             if (lfo->deform.deform_type == type_2)
             {
-                wf_history[3] = correlated_noise_o2mk2_suppliedrng(target, noised1, 0.f, urng);
-                wf_history[2] = correlated_noise_o2mk2_suppliedrng(target, noised1, 0.f, urng);
-                wf_history[1] = correlated_noise_o2mk2_suppliedrng(target, noised1, 0.f, urng);
-                wf_history[0] = correlated_noise_o2mk2_suppliedrng(target, noised1, 0.f, urng);
+                wf_history[3] =
+                    sdsp::correlated_noise_o2mk2_suppliedrng(target, noised1, 0.f, urng);
+                wf_history[2] =
+                    sdsp::correlated_noise_o2mk2_suppliedrng(target, noised1, 0.f, urng);
+                wf_history[1] =
+                    sdsp::correlated_noise_o2mk2_suppliedrng(target, noised1, 0.f, urng);
+                wf_history[0] =
+                    sdsp::correlated_noise_o2mk2_suppliedrng(target, noised1, 0.f, urng);
 
-                iout = correlated_noise_o2mk2_suppliedrng(target, noised1, 0.f, urng);
+                iout = sdsp::correlated_noise_o2mk2_suppliedrng(target, noised1, 0.f, urng);
             }
             else
             {
@@ -321,7 +354,7 @@ void LFOModulationSource::attack()
                  * the first value of SNH LFO was constant. This little loop fixes that.
                  */
                 for (int i = 0; i < 3; ++i)
-                    iout = correlated_noise_o2mk2_suppliedrng(
+                    iout = sdsp::correlated_noise_o2mk2_suppliedrng(
                         target, noised1, limit_range(localcopy[ideform].f, -1.f, 1.f), urng);
             }
         }
@@ -372,7 +405,7 @@ void LFOModulationSource::attack()
 
     case lt_noise:
     {
-        if (isFirstAttack || localcopy[lfo->trigmode.param_id_in_scene].i != lm_freerun)
+        if (isFirstAttack || lfo->trigmode.val.i != lm_freerun)
         {
             auto lid = limit_range(localcopy[ideform].f, -1.f, 1.f);
 
@@ -391,10 +424,13 @@ void LFOModulationSource::attack()
              */
             for (int i = 0; i < 3; ++i)
                 wf_history[3] =
-                    correlated_noise_o2mk2_suppliedrng(target, noised1, lid, urng) * phase;
-            wf_history[2] = correlated_noise_o2mk2_suppliedrng(target, noised1, lid, urng) * phase;
-            wf_history[1] = correlated_noise_o2mk2_suppliedrng(target, noised1, lid, urng) * phase;
-            wf_history[0] = correlated_noise_o2mk2_suppliedrng(target, noised1, lid, urng) * phase;
+                    sdsp::correlated_noise_o2mk2_suppliedrng(target, noised1, lid, urng) * phase;
+            wf_history[2] =
+                sdsp::correlated_noise_o2mk2_suppliedrng(target, noised1, lid, urng) * phase;
+            wf_history[1] =
+                sdsp::correlated_noise_o2mk2_suppliedrng(target, noised1, lid, urng) * phase;
+            wf_history[0] =
+                sdsp::correlated_noise_o2mk2_suppliedrng(target, noised1, lid, urng) * phase;
 
             phase = 0.f;
         }
@@ -460,21 +496,48 @@ void LFOModulationSource::release()
 {
     if (lfo->release.val.f < lfo->release.val_max.f)
     {
-        env_state = lfoeg_release;
         env_releasestart = env_val;
         env_phase = 0;
+        // If we release during the attack and are scaling the envelope we need
+        // to scale our release start point
+        if (envRetrigMode == FROM_LAST && envelopeStart != 0 &&
+            (env_state == lfoeg_attack || env_state == lfoeg_delay))
+        {
+            env_releasestart = env_releasestart * (1.0 - envelopeStart) + envelopeStart;
+        }
+        env_state = lfoeg_release;
     }
-    else if (localcopy[lfo->shape.param_id_in_scene].i == lt_mseg ||
-             localcopy[lfo->shape.param_id_in_scene].i == lt_formula)
+    else if (lfo->shape.val.i == lt_mseg || lfo->shape.val.i == lt_formula)
     {
         env_state = lfoeg_msegrelease;
     }
 }
 
+void LFOModulationSource::retriggerEnvelopeFrom(float start)
+{
+    env_state = lfoeg_delay;
+    env_phase = 0;
+    envelopeStart = start;
+    if (localcopy[idelay].f == lfo->delay.val_min.f)
+    {
+        env_state = lfoeg_attack;
+
+        if (localcopy[iattack].f == lfo->attack.val_min.f)
+        {
+            env_state = lfoeg_hold;
+            env_val = 1.f;
+
+            if (localcopy[ihold].f == lfo->hold.val_min.f)
+            {
+                env_state = lfoeg_decay;
+            }
+        }
+    }
+}
+
 void LFOModulationSource::process_block()
 {
-    if ((!phaseInitialized) ||
-        (localcopy[lfo->trigmode.param_id_in_scene].i == lm_keytrigger && lfo->rate.deactivated))
+    if ((!phaseInitialized) || (lfo->trigmode.val.i == lm_keytrigger && lfo->rate.deactivated))
     {
         initPhaseFromStartPhase();
     }
@@ -482,7 +545,7 @@ void LFOModulationSource::process_block()
     retrigger_FEG = false;
     retrigger_AEG = false;
 
-    int s = localcopy[lfo->shape.param_id_in_scene].i;
+    int s = lfo->shape.val.i;
     float frate = 0;
 
     if (!lfo->rate.temposync)
@@ -668,11 +731,12 @@ void LFOModulationSource::process_block()
                 wf_history[2] = wf_history[1];
                 wf_history[1] = wf_history[0];
 
-                wf_history[0] = correlated_noise_o2mk2_suppliedrng(target, noised1, 0.f, urng);
+                wf_history[0] =
+                    sdsp::correlated_noise_o2mk2_suppliedrng(target, noised1, 0.f, urng);
             }
             else
             {
-                iout = correlated_noise_o2mk2_suppliedrng(
+                iout = sdsp::correlated_noise_o2mk2_suppliedrng(
                     target, noised1, limit_range(localcopy[ideform].f, -1.f, 1.f), urng);
             }
         }
@@ -684,7 +748,7 @@ void LFOModulationSource::process_block()
             wf_history[2] = wf_history[1];
             wf_history[1] = wf_history[0];
 
-            wf_history[0] = correlated_noise_o2mk2_suppliedrng(
+            wf_history[0] = sdsp::correlated_noise_o2mk2_suppliedrng(
                 target, noised1, limit_range(localcopy[ideform].f, -1.f, 1.f), urng);
         }
         break;
@@ -789,7 +853,7 @@ void LFOModulationSource::process_block()
 
             if (localcopy[ideform].f < 0.f)
             {
-                iout = env_val + (correlated_noise_o2mk2_suppliedrng(
+                iout = env_val + (sdsp::correlated_noise_o2mk2_suppliedrng(
                                       target, noised1, 1.f - fabs(localcopy[ideform].f), urng) *
                                   0.2);
             }
@@ -932,8 +996,8 @@ void LFOModulationSource::process_block()
             if (df > 0.5f)
             {
                 float linear = (1.f - phase) * wf_history[2] + phase * wf_history[1];
-                float cubic =
-                    cubic_ipol(wf_history[3], wf_history[2], wf_history[1], wf_history[0], phase);
+                float cubic = sdsp::cubic_ipol(wf_history[3], wf_history[2], wf_history[1],
+                                               wf_history[0], phase);
 
                 iout = (2.f - 2.f * df) * linear + (2.f * df - 1.0f) * cubic;
             }
@@ -963,7 +1027,7 @@ void LFOModulationSource::process_block()
 
     case lt_noise:
     {
-        iout = cubic_ipol(wf_history[3], wf_history[2], wf_history[1], wf_history[0], phase);
+        iout = sdsp::cubic_ipol(wf_history[3], wf_history[2], wf_history[1], wf_history[0], phase);
 
         break;
     }
@@ -1049,7 +1113,8 @@ void LFOModulationSource::process_block()
                     linear = (1.f - ph) * wf_history[2] + ph * wf_history[1];
                 }
 
-                float qbs = quad_bspline(wf_history[2], wf_history[1], wf_history[0], calcPhase);
+                float qbs =
+                    sdsp::quad_bspline(wf_history[2], wf_history[1], wf_history[0], calcPhase);
 
                 iout = (2.f - 2.f * df) * linear + (2.f * df - 1.0f) * qbs;
             }
@@ -1088,8 +1153,8 @@ void LFOModulationSource::process_block()
             if (df > 0.5f)
             {
                 float linear = (1.f - calcPhase) * wf_history[2] + calcPhase * wf_history[1];
-                float cubic = cubic_ipol(wf_history[3], wf_history[2], wf_history[1], wf_history[0],
-                                         calcPhase);
+                float cubic = sdsp::cubic_ipol(wf_history[3], wf_history[2], wf_history[1],
+                                               wf_history[0], calcPhase);
 
                 iout = (2.f - 2.f * df) * linear + (2.f * df - 1.0f) * cubic;
             }
@@ -1204,21 +1269,86 @@ void LFOModulationSource::process_block()
         }
     }
 
+    // Correct the envelope for the start case
+    // (in a way which works for all sequencers except lt_envelope)
+    float useenv0{0.0};
+    float outputEnvVal{useenvval};
+    if (envRetrigMode == FROM_LAST)
+    {
+        float off = envelopeStart;
+        float scale = (1.0 - envelopeStart);
+        if (env_state == lfoeg_delay || env_state == lfoeg_attack)
+        {
+            useenvval = useenvval * scale;
+            useenv0 = off;
+            outputEnvVal = useenvval;
+        }
+    }
     auto magnf = limit_range(lfo->magnitude.get_extended(localcopy[magn].f), -3.f, 3.f);
 
-    output_multi[0] = useenvval * magnf * io2;
+    output_multi[0] = (useenvval + useenv0) * magnf * io2;
     output_multi[1] = io2;
-    output_multi[2] = env_val;
+    output_multi[2] = outputEnvVal + useenv0; // env_val;
+
+    if (lfo->lfoExtraAmplitude == LFOStorage::SCALED)
+    {
+        output_multi[1] *= magnf;
+        output_multi[2] *= magnf;
+    }
 
     if (s == lt_envelope)
     {
-        output_multi[1] *= useenvval;
+        // Additional start mode corrections required
+        if (envelopeStart != 1 && envelopeStart != 0 && envRetrigMode == FROM_LAST &&
+            (env_state == lfoeg_delay || env_state == lfoeg_attack))
+        {
+            // We need to back out the deforms if we can
+            auto os = envelopeStart;
+            auto dv = localcopy[ideform].f;
+            if (lfo->deform.deform_type == type_1)
+            {
+                // type 1: r = (1-d)*p + d * p*p solve for p
+                os = (1 - dv) * envelopeStart + dv * envelopeStart * envelopeStart;
+            }
+            else if (lfo->deform.deform_type == type_2)
+            {
+                // r = r^(1+0*dv) dv>0; r^(1/(-4*dv)) dv < 0
+                if (dv > 0)
+                    os = pow(os, 1 + 9 * dv);
+                else
+                    os = pow(os, 1 / (1 - 4 * dv));
+            }
+            // type 3 (random) is non-invertible. You just get a jump then.
+            float scale = (1.0 - os);
+            useenvval = useenvval * scale / (1 - envelopeStart);
+            useenv0 = os;
+
+            output_multi[0] = useenvval * magnf * io2 + useenv0;
+
+            output_multi[1] *= useenvval;
+            output_multi[1] += useenv0;
+        }
+        else
+        {
+            output_multi[1] *= useenvval;
+            output_multi[1] += useenv0;
+        }
+
+        if (envRetrigMode == FROM_LAST && lfo->deform.deform_type != type_3)
+        {
+            // Now appy the one pole
+            float alpha = onepoleFactor;
+            output_multi[0] = (1.0 - alpha) * output_multi[0] + alpha * onepoleState[0];
+            output_multi[1] = (1.0 - alpha) * output_multi[1] + alpha * onepoleState[1];
+            onepoleState[0] = output_multi[0];
+            onepoleState[1] = output_multi[1];
+        }
     }
 }
 
 void LFOModulationSource::completedModulation()
 {
-    if (localcopy[lfo->shape.param_id_in_scene].i == lt_formula)
+    if (lfo->shape.val.i == lt_formula)
     {
         Surge::Formula::cleanEvaluatorState(formulastate);
     }

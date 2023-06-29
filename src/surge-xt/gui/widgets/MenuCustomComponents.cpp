@@ -1,21 +1,30 @@
 /*
-** Surge Synthesizer is Free and Open Source Software
-**
-** Surge is made available under the Gnu General Public License, v3.0
-** https://www.gnu.org/licenses/gpl-3.0.en.html
-**
-** Copyright 2004-2020 by various individuals as described by the Git transaction log
-**
-** All source at: https://github.com/surge-synthesizer/surge.git
-**
-** Surge was a commercial product from 2004-2018, with Copyright and ownership
-** in that period held by Claes Johanson at Vember Audio. Claes made Surge
-** open source in September 2018.
-*/
+ * Surge XT - a free and open source hybrid synthesizer,
+ * built by Surge Synth Team
+ *
+ * Learn more at https://surge-synthesizer.github.io/
+ *
+ * Copyright 2018-2023, various authors, as described in the GitHub
+ * transaction log.
+ *
+ * Surge XT is released under the GNU General Public Licence v3
+ * or later (GPL-3.0-or-later). The license is found in the "LICENSE"
+ * file in the root of this repository, or at
+ * https://www.gnu.org/licenses/gpl-3.0.en.html
+ *
+ * Surge was a commercial product from 2004-2018, copyright and ownership
+ * held by Claes Johanson at Vember Audio during that period.
+ * Claes made Surge open source in September 2018.
+ *
+ * All source for Surge XT is available at
+ * https://github.com/surge-synthesizer/surge
+ */
 
 #include "MenuCustomComponents.h"
 #include "SurgeImageStore.h"
 #include "SurgeImage.h"
+#include "UserDefaults.h"
+#include <fmt/format.h>
 #include <StringOps.h>
 
 namespace Surge
@@ -29,13 +38,20 @@ void TinyLittleIconButton::paint(juce::Graphics &g)
 {
     auto yp = offset * 20;
     auto xp = isHovered ? 20 : 0;
-    g.reduceClipRegion(getLocalBounds());
     auto t = juce::AffineTransform();
+
     t = t.translated(-xp, -yp);
+    g.reduceClipRegion(getLocalBounds());
+
     if (getWidth() < 20 || getHeight() < 20)
+    {
         t = t.scaled(getWidth() / 20.f);
+    }
+
     if (icons)
+    {
         icons->draw(g, 1.0, t);
+    }
 }
 
 struct TinyLittleIconButtonAH : public juce::AccessibilityHandler
@@ -63,7 +79,7 @@ std::unique_ptr<juce::AccessibilityHandler> TinyLittleIconButton::createAccessib
 
 void MenuTitleHelpComponent::getIdealSize(int &idealWidth, int &idealHeight)
 {
-    auto standardMenuItemHeight = 20;
+    auto standardMenuItemHeight = 25;
 
     juce::Font font;
 
@@ -146,10 +162,7 @@ void MenuTitleHelpComponent::paint(juce::Graphics &g)
 
     auto tl = r.getTopLeft();
 
-    if (!isCentered)
-    {
-        tl = tl.translated(12, 0);
-    }
+    tl = tl.translated(isCentered ? 0 : 12, 2);
 
     auto clipBox = juce::Rectangle<int>(tl.x, tl.y, 20, 20);
 
@@ -162,6 +175,7 @@ void MenuTitleHelpComponent::paint(juce::Graphics &g)
 }
 
 void MenuTitleHelpComponent::mouseUp(const juce::MouseEvent &e) { launchHelp(); }
+
 bool MenuTitleHelpComponent::keyPressed(const juce::KeyPress &k)
 {
     if (k.isKeyCode(juce::KeyPress::returnKey) || k.isKeyCode(juce::KeyPress::spaceKey))
@@ -190,6 +204,9 @@ struct MenuTitleHelpComponentAH : public juce::AccessibilityHandler
     {
     }
 
+    juce::String getTitle() const override { return itemComponent.getTitle(); }
+    juce::String getDescription() const override { return itemComponent.getDescription(); }
+
     void showHelp() { itemComponent.launchHelp(); }
 
     MenuTitleHelpComponent &itemComponent;
@@ -203,29 +220,35 @@ std::unique_ptr<juce::AccessibilityHandler> MenuTitleHelpComponent::createAccess
 void MenuCenteredBoldLabel::getIdealSize(int &idealWidth, int &idealHeight)
 {
     getLookAndFeel().getIdealPopupMenuItemSize(label, false, -1, idealWidth, idealHeight);
+
+    if (isSectionHeader)
+    {
+        idealHeight += 12;
+    }
+    else
+    {
+        idealHeight += 8;
+    }
 }
 
 void MenuCenteredBoldLabel::paint(juce::Graphics &g)
 {
-    auto r = getLocalBounds().reduced(1);
+    auto r = getLocalBounds();
     auto ft = getLookAndFeel().getPopupMenuFont();
-    ft = ft.withHeight(ft.getHeight() - 1).boldened();
-    g.setFont(ft);
-    if (isItemHighlighted())
-    {
-        g.setColour(findColour(juce::PopupMenu::highlightedBackgroundColourId));
-        g.fillRect(r);
 
-        g.setColour(findColour(juce::PopupMenu::highlightedTextColourId));
+    ft = ft.withHeight(ft.getHeight() - 1).boldened();
+
+    g.setFont(ft);
+    g.setColour(getLookAndFeel().findColour(juce::PopupMenu::ColourIds::textColourId));
+
+    if (isSectionHeader)
+    {
+        g.drawText(label, r.withTrimmedLeft(12), juce::Justification::centredLeft);
     }
     else
     {
-        g.setColour(getLookAndFeel().findColour(juce::PopupMenu::ColourIds::textColourId));
-    }
-    if (isSectionHeader)
-        g.drawText(label, r.withTrimmedLeft(5), juce::Justification::centredLeft);
-    else
         g.drawText(label, r, juce::Justification::centred);
+    }
 }
 
 void MenuCenteredBoldLabel::addToMenu(juce::PopupMenu &m, const std::string label)
@@ -260,36 +283,61 @@ std::unique_ptr<juce::AccessibilityHandler> MenuCenteredBoldLabel::createAccessi
     return std::make_unique<MenuCenteredBoldLabelAH>(*this);
 }
 
-ModMenuCustomComponent::ModMenuCustomComponent(const std::string &s, const std::string &a,
-                                               std::function<void(OpType)> cb)
-    : juce::PopupMenu::CustomComponent(false), source(s), amount(a), callback(std::move(cb))
+ModMenuCustomComponent::ModMenuCustomComponent(SurgeStorage *storage, const std::string &s,
+                                               const std::string &a, std::function<void(OpType)> cb,
+                                               bool tgt, bool isApplyToAll)
+    : juce::PopupMenu::CustomComponent(false), source(s), amount(a), callback(std::move(cb)),
+      isTarget(tgt)
 {
-    auto tb = std::make_unique<TinyLittleIconButton>(1, [this]() {
+    isMenuExpanded = Surge::Storage::getUserDefaultValue(
+        storage, Surge::Storage::ExpandModMenusWithSubMenus, false);
+
+    auto tbc = std::make_unique<TinyLittleIconButton>(1, [this]() {
         callback(CLEAR);
         triggerMenuItem();
     });
-    addAndMakeVisible(*tb);
-    clear = std::move(tb);
-    clear->accLabel = "Clear " + s;
+    addAndMakeVisible(*tbc);
+    clear = std::move(tbc);
+    clear->accLabel = isApplyToAll ? Surge::GUI::toOSCase("Clear All Modulations") : ("Clear " + s);
 
-    tb = std::make_unique<TinyLittleIconButton>(2, [this]() {
+    auto tbm = std::make_unique<TinyLittleIconButton>(2, [this]() {
         callback(MUTE);
         triggerMenuItem();
     });
-    addAndMakeVisible(*tb);
-    mute = std::move(tb);
-    mute->accLabel = "Mute " + s;
+    addAndMakeVisible(*tbm);
+    mute = std::move(tbm);
+    mute->accLabel = isApplyToAll ? Surge::GUI::toOSCase("Unmute All Modulations") : ("Mute " + s);
 
-    tb = std::make_unique<TinyLittleIconButton>(0, [this]() {
+    auto tbe = std::make_unique<TinyLittleIconButton>(0, [this]() {
         callback(EDIT);
         triggerMenuItem();
     });
-    addAndMakeVisible(*tb);
-    edit = std::move(tb);
-    edit->accLabel = "Edit " + s;
+    addAndMakeVisible(*tbe);
+    edit = std::move(tbe);
+    edit->accLabel = isApplyToAll ? Surge::GUI::toOSCase("Mute All Modulations") : ("Edit " + s);
+
+    if (isMenuExpanded)
+    {
+        clear->setEnabled(false);
+        clear->setVisible(false);
+        mute->setEnabled(false);
+        mute->setVisible(false);
+        edit->setEnabled(false);
+        edit->setVisible(false);
+    }
+
+    if (isApplyToAll)
+    {
+        setTitle(fmt::format("Apply to all modulations"));
+    }
+    else
+    {
+        std::string toFrom = isTarget ? "To" : "From";
+
+        setTitle(fmt::format("{} {} by {}", toFrom, source, amount));
+    }
 
     setAccessible(true);
-    setTitle(std::string("From ") + source + " by " + amount);
     setDescription(getTitle());
     setFocusContainerType(juce::Component::FocusContainerType::keyboardFocusContainer);
 }
@@ -303,11 +351,13 @@ void ModMenuCustomComponent::getIdealSize(int &idealWidth, int &idealHeight)
     auto h = idealHeight - 2 * mg;
     idealWidth += 3 * mg + 3 * (mg + h) + xp;
 }
+
 void ModMenuCustomComponent::paint(juce::Graphics &g)
 {
     if (isItemHighlighted())
     {
         auto r = getLocalBounds().reduced(1);
+
         g.setColour(findColour(juce::PopupMenu::highlightedBackgroundColourId));
         g.fillRect(r);
 
@@ -317,20 +367,40 @@ void ModMenuCustomComponent::paint(juce::Graphics &g)
     {
         g.setColour(getLookAndFeel().findColour(juce::PopupMenu::ColourIds::textColourId));
     }
+
     auto h = getHeight() - 2 * mg;
-    auto r = getLocalBounds().withTrimmedLeft(xp + 3 * mg + 3 * (h + mg) + mg).withTrimmedRight(4);
+    auto tl = isMenuExpanded ? (xp + 3 * mg) : (xp + 3 * mg + 3 * (h + mg) + mg);
+    auto r = getLocalBounds().withTrimmedLeft(tl).withTrimmedRight(4);
     auto ft = getLookAndFeel().getPopupMenuFont();
+
     ft = ft.withHeight(ft.getHeight() - 1);
     g.setFont(ft);
     g.drawText(source, r, juce::Justification::centredLeft);
     g.drawText(amount, r, juce::Justification::centredRight);
 }
 
+std::unique_ptr<juce::PopupMenu> ModMenuCustomComponent::createAccessibleSubMenu()
+{
+    if (!isMenuExpanded)
+    {
+        return nullptr;
+    }
+
+    auto res = std::make_unique<juce::PopupMenu>();
+    auto fn = callback;
+
+    res->addItem(edit->accLabel, [fn]() { fn(EDIT); });
+    res->addItem(mute->accLabel, [fn]() { fn(MUTE); });
+    res->addItem(clear->accLabel, [fn]() { fn(CLEAR); });
+
+    return std::move(res);
+}
+
 void ModMenuCustomComponent::setIsMuted(bool b)
 {
     if (b)
     {
-        mute->accLabel = "UnMute " + source;
+        mute->accLabel = "Unmute " + source;
         mute->offset = 3; // use the 2nd (mute with bar) icon
     }
     else
@@ -343,6 +413,7 @@ void ModMenuCustomComponent::setIsMuted(bool b)
 void ModMenuCustomComponent::resized()
 {
     auto h = getHeight() - 2 * mg;
+
     clear->setBounds(xp + mg + 0 * (h + mg), mg, h, h);
     clear->toFront(false);
     mute->setBounds(xp + mg + 1 * (h + mg), mg, h, h);
@@ -363,8 +434,10 @@ bool ModMenuCustomComponent::keyPressed(const juce::KeyPress &k)
     {
         callback(EDIT);
         triggerMenuItem();
+
         return true;
     }
+
     return false;
 }
 
@@ -407,24 +480,44 @@ std::unique_ptr<juce::AccessibilityHandler> ModMenuCustomComponent::createAccess
 }
 
 // bit of a hack - the menus mean something different so do a cb on a cb
-ModMenuForAllComponent::ModMenuForAllComponent(std::function<void(AllAction)> cb)
-    : allCB(cb),
-      ModMenuCustomComponent(Surge::GUI::toOSCase("Apply to All"), "", [this](OpType op) {
-          switch (op)
-          {
-          case ModMenuCustomComponent::CLEAR:
-              allCB(CLEAR);
-              break;
-          case ModMenuCustomComponent::MUTE:
-              allCB(UNMUTE);
-              break;
-          case ModMenuCustomComponent::EDIT:
-              allCB(MUTE);
-              break;
-          }
-      })
+ModMenuForAllComponent::ModMenuForAllComponent(SurgeStorage *storage,
+                                               std::function<void(AllAction)> cb, bool isTarget)
+    : allCB(cb), ModMenuCustomComponent(
+                     storage, Surge::GUI::toOSCase("Apply to All"), "",
+                     [this](OpType op) {
+                         switch (op)
+                         {
+                         case ModMenuCustomComponent::CLEAR:
+                             allCB(CLEAR);
+                             break;
+                         case ModMenuCustomComponent::MUTE:
+                             allCB(UNMUTE);
+                             break;
+                         case ModMenuCustomComponent::EDIT:
+                             allCB(MUTE);
+                             break;
+                         }
+                     },
+                     isTarget, true)
 {
     edit->offset = 3;
+}
+
+std::unique_ptr<juce::PopupMenu> ModMenuForAllComponent::createAccessibleSubMenu()
+{
+    if (!isMenuExpanded)
+    {
+        return nullptr;
+    }
+
+    auto res = std::make_unique<juce::PopupMenu>();
+    auto fn = allCB;
+
+    res->addItem(edit->accLabel, [fn]() { fn(MUTE); });
+    res->addItem(mute->accLabel, [fn]() { fn(UNMUTE); });
+    res->addItem(clear->accLabel, [fn]() { fn(CLEAR); });
+
+    return std::move(res);
 }
 
 } // namespace Widgets

@@ -1,20 +1,30 @@
 /*
-** Surge Synthesizer is Free and Open Source Software
-**
-** Surge is made available under the Gnu General Public License, v3.0
-** https://www.gnu.org/licenses/gpl-3.0.en.html
-**
-** Copyright 2004-2021 by various individuals as described by the Git transaction log
-**
-** All source at: https://github.com/surge-synthesizer/surge.git
-**
-** Surge was a commercial product from 2004-2018, with Copyright and ownership
-** in that period held by Claes Johanson at Vember Audio. Claes made Surge
-** open source in September 2018.
-*/
+ * Surge XT - a free and open source hybrid synthesizer,
+ * built by Surge Synth Team
+ *
+ * Learn more at https://surge-synthesizer.github.io/
+ *
+ * Copyright 2018-2023, various authors, as described in the GitHub
+ * transaction log.
+ *
+ * Surge XT is released under the GNU General Public Licence v3
+ * or later (GPL-3.0-or-later). The license is found in the "LICENSE"
+ * file in the root of this repository, or at
+ * https://www.gnu.org/licenses/gpl-3.0.en.html
+ *
+ * Surge was a commercial product from 2004-2018, copyright and ownership
+ * held by Claes Johanson at Vember Audio during that period.
+ * Claes made Surge open source in September 2018.
+ *
+ * All source for Surge XT is available at
+ * https://github.com/surge-synthesizer/surge
+ */
 
 #include "CombulatorEffect.h"
 #include "DebugHelpers.h"
+#include "fmt/core.h"
+#include "sst/basic-blocks/dsp/CorrelatedNoise.h"
+#include "sst/basic-blocks/mechanics/block-ops.h"
 
 CombulatorEffect::CombulatorEffect(SurgeStorage *storage, FxStorage *fxdata, pdata *pd)
     : Effect(storage, fxdata, pd), halfbandIN(6, true), halfbandOUT(6, true), lp(storage),
@@ -45,6 +55,7 @@ CombulatorEffect::CombulatorEffect(SurgeStorage *storage, FxStorage *fxdata, pda
     {
         auto piby2 = M_PI / 2.0;
         double panAngle = 1.0 * i / (PANLAW_SIZE - 1) * piby2;
+
         panL[i] = sqrt((piby2 - panAngle) / piby2 * cos(panAngle));
         panR[i] = sqrt(panAngle * sin(panAngle) / piby2);
     }
@@ -67,10 +78,12 @@ void CombulatorEffect::init()
 {
     sampleRateReset();
     setvars(true);
+
     bi = 0;
     lp.suspend();
 
     memset(filterDelay, 0, 3 * 2 * (MAX_FB_COMB_EXTENDED + FIRipol_N) * sizeof(float));
+
     envV[0] = 0.f;
     envV[1] = 0.f;
 
@@ -86,21 +99,28 @@ void CombulatorEffect::setvars(bool init)
     {
         if (i == 0)
         {
-            freq[i].newValue(*f[combulator_freq1]);
+            freq[i].newValue(*pd_float[combulator_freq1]);
         }
         else
         {
-            freq[i].newValue(*f[combulator_freq1] + *f[combulator_freq1 + i]);
+            if (fxdata->p[combulator_freq1 + i].extend_range)
+            {
+                freq[i].newValue(*pd_float[combulator_freq1 + i]);
+            }
+            else
+            {
+                freq[i].newValue(*pd_float[combulator_freq1] + *pd_float[combulator_freq1 + i]);
+            }
         }
 
-        gain[i].newValue(amp_to_linear(limit_range(*f[combulator_gain1 + i], 0.f, 2.f)));
+        gain[i].newValue(amp_to_linear(limit_range(*pd_float[combulator_gain1 + i], 0.f, 2.f)));
     }
 
-    noisemix.newValue(clamp01(*f[combulator_noise_mix]));
-    feedback.newValue(*f[combulator_feedback]);
-    tone.newValue(clamp1bp(*f[combulator_tone]));
-    pan2.newValue(clamp1bp(*f[combulator_pan2]));
-    pan3.newValue(clamp1bp(*f[combulator_pan3]));
+    noisemix.newValue(clamp01(*pd_float[combulator_noise_mix]));
+    feedback.newValue(*pd_float[combulator_feedback]);
+    tone.newValue(clamp1bp(*pd_float[combulator_tone]));
+    pan2.newValue(clamp1bp(*pd_float[combulator_pan2]));
+    pan3.newValue(clamp1bp(*pd_float[combulator_pan3]));
 
     negone.set_target(-1.f);
 
@@ -163,8 +183,12 @@ inline float get1f(__m128 m, int i) { return *((float *)&m + i); }
 void CombulatorEffect::sampleRateReset()
 {
     for (int e = 0; e < 3; ++e)
+    {
         for (int c = 0; c < 2; ++c)
+        {
             coeff[e][c].setSampleRateAndBlockSize((float)storage->dsamplerate_os, BLOCK_SIZE_OS);
+        }
+    }
 }
 
 void CombulatorEffect::process(float *dataL, float *dataR)
@@ -173,7 +197,8 @@ void CombulatorEffect::process(float *dataL, float *dataR)
 
     // Upsample the input
     float dataOS alignas(16)[2][BLOCK_SIZE_OS];
-    halfbandIN.process_block_U2(dataL, dataR, dataOS[0], dataOS[1]);
+
+    halfbandIN.process_block_U2(dataL, dataR, dataOS[0], dataOS[1], BLOCK_SIZE_OS);
 
     /*
      * Select the coefficients. Here you have to base yourself on the mode switch and
@@ -181,6 +206,7 @@ void CombulatorEffect::process(float *dataL, float *dataR)
      * and the frequency of the particular band.
      */
     using namespace sst::filters;
+
     int type = fut_comb_pos, subtype = 1;
 
     auto filtptr =
@@ -193,6 +219,7 @@ void CombulatorEffect::process(float *dataL, float *dataR)
      * So now set up across the voices (e for 'entry' to match SurgeVoice) and the channels (c)
      */
     bool useTuning = fxdata->p[combulator_freq1].extend_range;
+
     for (int e = 0; e < 3; ++e)
     {
         for (int c = 0; c < 2; ++c)
@@ -227,14 +254,20 @@ void CombulatorEffect::process(float *dataL, float *dataR)
         {
             auto v = dataOS[c][s];
             auto e = envV[c];
+
             if (v > e)
+            {
                 e = envA * (e - v) + v;
+            }
             else
+            {
                 e = envR * (e - v) + v;
+            }
+
             envV[c] = e;
-            noise[c] =
-                noisemix.v * 3.f * envV[c] *
-                correlated_noise_o2mk2_storagerng(noiseGen[c][0], noiseGen[c][1], 0, storage);
+            noise[c] = noisemix.v * 3.f * envV[c] *
+                       sst::basic_blocks::dsp::correlated_noise_o2mk2_supplied_value(
+                           noiseGen[c][0], noiseGen[c][1], 0, storage->rand_pm1());
         }
 
         auto l128 = _mm_setzero_ps();
@@ -290,8 +323,8 @@ void CombulatorEffect::process(float *dataL, float *dataR)
         dataOS[0][s] = mixl;
         dataOS[1][s] = mixr;
 
-        // lag class only works at BLOCK_SIZE time, not BLOCK_SIZE_OS, so call process every
-        // other sample
+        // lag class only works at BLOCK_SIZE time, not BLOCK_SIZE_OS,
+        // so call process every other sample
         if (s % 2 == 0)
         {
             for (auto i = 0; i < 3; ++i)
@@ -321,6 +354,7 @@ void CombulatorEffect::process(float *dataL, float *dataR)
                 coeff[e][c].C[i] = get1f(qfus[c].C[i], e);
             }
         }
+
         for (int i = 0; i < n_filter_registers; i++)
         {
             for (int e = 0; e < 3; ++e)
@@ -339,9 +373,10 @@ void CombulatorEffect::process(float *dataL, float *dataR)
     }
 
     /* Downsample out */
-    halfbandOUT.process_block_D2(dataOS[0], dataOS[1]);
-    copy_block(dataOS[0], L, BLOCK_SIZE_QUAD);
-    copy_block(dataOS[1], R, BLOCK_SIZE_QUAD);
+    halfbandOUT.process_block_D2(dataOS[0], dataOS[1], BLOCK_SIZE_OS);
+
+    sst::basic_blocks::mechanics::copy_from_to<BLOCK_SIZE>(dataOS[0], L);
+    sst::basic_blocks::mechanics::copy_from_to<BLOCK_SIZE>(dataOS[1], R);
 
     if (!fxdata->p[combulator_tone].deactivated)
     {
@@ -349,7 +384,7 @@ void CombulatorEffect::process(float *dataL, float *dataR)
         hp.process_block(L, R);
     }
 
-    auto cm = clamp01(*f[combulator_mix]);
+    auto cm = clamp01(*pd_float[combulator_mix]);
 
     mix.set_target_smoothed(cm);
     mix.fade_2_blocks_to(dataL, L, dataR, R, dataL, dataR, BLOCK_SIZE_QUAD);
@@ -392,19 +427,82 @@ void CombulatorEffect::init_ctrltypes()
 {
     Effect::init_ctrltypes();
 
+    // Dynamic names and bipolarity support
+    static struct DynTexDynamicNameBip : public ParameterDynamicNameFunction,
+                                         ParameterDynamicBoolFunction
+    {
+        const char *getName(const Parameter *p) const override
+        {
+            auto fx = &(p->storage->getPatch().fx[p->ctrlgroup_entry]);
+            auto idx = p - fx->p;
+
+            static std::string res;
+
+            switch (idx)
+            {
+            case combulator_freq1:
+                if (fx->p[combulator_freq2].extend_range && fx->p[combulator_freq3].extend_range)
+                {
+                    res = "Frequency 1";
+                }
+                else
+                {
+                    res = "Center";
+                }
+                break;
+            case combulator_freq2:
+                if (fx->p[combulator_freq2].extend_range)
+                {
+                    res = "Frequency 2";
+                }
+                else
+                {
+                    res = "Offset 2";
+                }
+                break;
+            case combulator_freq3:
+                if (fx->p[combulator_freq3].extend_range)
+                {
+                    res = "Frequency 3";
+                }
+                else
+                {
+                    res = "Offset 3";
+                }
+                break;
+            default:
+                break;
+            }
+
+            return res.c_str();
+        }
+
+        bool getValue(const Parameter *p) const override
+        {
+            auto fx = &(p->storage->getPatch().fx[p->ctrlgroup_entry]);
+            auto idx = p - fx->p;
+            auto isBipolar = !fx->p[idx].extend_range;
+
+            return isBipolar;
+        }
+    } dynTexDynamicNameBip;
+
     fxdata->p[combulator_noise_mix].set_name("Extra Noise");
     fxdata->p[combulator_noise_mix].set_type(ct_percent);
     fxdata->p[combulator_noise_mix].posy_offset = 1;
 
     fxdata->p[combulator_freq1].set_name("Center");
-    fxdata->p[combulator_freq1].set_type(ct_freq_audible_with_very_low_lowerbound);
+    fxdata->p[combulator_freq1].set_type(ct_freq_audible_very_low_minval);
+    fxdata->p[combulator_freq1].dynamicName = &dynTexDynamicNameBip;
     fxdata->p[combulator_freq1].posy_offset = 3;
-    fxdata->p[combulator_freq2].set_name("Offset 1");
-    fxdata->p[combulator_freq2].set_type(ct_pitch);
+    fxdata->p[combulator_freq2].set_type(ct_pitch_extendable_very_low_minval);
     fxdata->p[combulator_freq2].posy_offset = 3;
-    fxdata->p[combulator_freq3].set_name("Offset 2");
-    fxdata->p[combulator_freq3].set_type(ct_pitch);
+    fxdata->p[combulator_freq2].dynamicName = &dynTexDynamicNameBip;
+    fxdata->p[combulator_freq2].dynamicBipolar = &dynTexDynamicNameBip;
+    fxdata->p[combulator_freq3].set_type(ct_pitch_extendable_very_low_minval);
     fxdata->p[combulator_freq3].posy_offset = 3;
+    fxdata->p[combulator_freq3].dynamicName = &dynTexDynamicNameBip;
+    fxdata->p[combulator_freq3].dynamicBipolar = &dynTexDynamicNameBip;
     fxdata->p[combulator_feedback].set_name("Feedback");
     fxdata->p[combulator_feedback].set_type(ct_percent_bipolar);
     fxdata->p[combulator_feedback].posy_offset = 3;
@@ -439,7 +537,9 @@ void CombulatorEffect::init_default_values()
 
     fxdata->p[combulator_freq1].val.f = -9.0f;
     fxdata->p[combulator_freq2].val.f = 0.25f;
+    fxdata->p[combulator_freq2].set_extend_range(false);
     fxdata->p[combulator_freq3].val.f = -0.25f;
+    fxdata->p[combulator_freq3].set_extend_range(false);
     fxdata->p[combulator_feedback].val.f = 0.75f;
     fxdata->p[combulator_tone].val.f = fxdata->p[combulator_tone].val_max.f;
 
@@ -460,5 +560,11 @@ void CombulatorEffect::handleStreamingMismatches(int streamingRevision,
     if (streamingRevision <= 17)
     {
         fxdata->p[combulator_tone].deactivated = false;
+    }
+
+    if (streamingRevision <= 20)
+    {
+        fxdata->p[combulator_freq2].set_extend_range(false);
+        fxdata->p[combulator_freq3].set_extend_range(false);
     }
 }

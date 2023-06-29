@@ -1,16 +1,23 @@
 /*
- ** Surge Synthesizer is Free and Open Source Software
- **
- ** Surge is made available under the Gnu General Public License, v3.0
- ** https://www.gnu.org/licenses/gpl-3.0.en.html
- **
- ** Copyright 2004-2021 by various individuals as described by the Git transaction log
- **
- ** All source at: https://github.com/surge-synthesizer/surge.git
- **
- ** Surge was a commercial product from 2004-2018, with Copyright and ownership
- ** in that period held by Claes Johanson at Vember Audio. Claes made Surge
- ** open source in September 2018.
+ * Surge XT - a free and open source hybrid synthesizer,
+ * built by Surge Synth Team
+ *
+ * Learn more at https://surge-synthesizer.github.io/
+ *
+ * Copyright 2018-2023, various authors, as described in the GitHub
+ * transaction log.
+ *
+ * Surge XT is released under the GNU General Public Licence v3
+ * or later (GPL-3.0-or-later). The license is found in the "LICENSE"
+ * file in the root of this repository, or at
+ * https://www.gnu.org/licenses/gpl-3.0.en.html
+ *
+ * Surge was a commercial product from 2004-2018, copyright and ownership
+ * held by Claes Johanson at Vember Audio during that period.
+ * Claes made Surge open source in September 2018.
+ *
+ * All source for Surge XT is available at
+ * https://github.com/surge-synthesizer/surge
  */
 
 #include "LuaSupport.h"
@@ -20,7 +27,9 @@
 #include <sstream>
 #include <cstring>
 #include "basic_dsp.h"
+#if HAS_JUCE
 #include "SurgeSharedBinary.h"
+#endif
 #include "lua/LuaSources.h"
 
 bool Surge::LuaSupport::parseStringDefiningFunction(lua_State *L, const std::string &definition,
@@ -37,6 +46,7 @@ int Surge::LuaSupport::parseStringDefiningMultipleFunctions(
     lua_State *L, const std::string &definition, const std::vector<std::string> functions,
     std::string &errorMessage)
 {
+#if HAS_LUA
     const char *lua_script = definition.c_str();
     auto lerr = luaL_loadbuffer(L, lua_script, strlen(lua_script), "lua-script");
     if (lerr != LUA_OK)
@@ -89,20 +99,26 @@ int Surge::LuaSupport::parseStringDefiningMultipleFunctions(
     }
 
     return res;
+#else
+    return 0;
+#endif
 }
 
 int lua_limitRange(lua_State *L)
 {
+#if HAS_LUA
     auto x = luaL_checknumber(L, -3);
     auto low = luaL_checknumber(L, -2);
     auto high = luaL_checknumber(L, -1);
     auto res = limit_range(x, low, high);
     lua_pushnumber(L, res);
+#endif
     return 1;
 }
 
 bool Surge::LuaSupport::setSurgeFunctionEnvironment(lua_State *L)
 {
+#if HAS_LUA
     if (!lua_isfunction(L, -1))
     {
         return false;
@@ -161,12 +177,15 @@ bool Surge::LuaSupport::setSurgeFunctionEnvironment(lua_State *L)
     // and now we are back to f>t so we can setfenv it
     lua_setfenv(L, -2);
 
+#endif
+
     // And now the stack is back to just the function wrapped
     return true;
 }
 
 bool Surge::LuaSupport::loadSurgePrelude(lua_State *s)
 {
+#if HAS_LUA
     auto guard = SGLD("loadPrologue", s);
     // now load the surge library
     auto &lua_script = LuaSources::surge_prelude;
@@ -174,6 +193,7 @@ bool Surge::LuaSupport::loadSurgePrelude(lua_State *s)
     auto load_stat = luaL_loadbuffer(s, lua_script.c_str(), lua_size, lua_script.c_str());
     auto pcall = lua_pcall(s, 0, 1, 0);
     lua_setglobal(s, "surge");
+#endif
     return true;
 }
 
@@ -183,11 +203,13 @@ Surge::LuaSupport::SGLD::~SGLD()
 {
     if (L)
     {
+#if HAS_LUA
         auto nt = lua_gettop(L);
         if (nt != top)
         {
             std::cout << "Guarded stack leak: [" << label << "] exit=" << nt << " enter=" << top
                       << std::endl;
         }
+#endif
     }
 }

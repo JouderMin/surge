@@ -1,6 +1,28 @@
+/*
+ * Surge XT - a free and open source hybrid synthesizer,
+ * built by Surge Synth Team
+ *
+ * Learn more at https://surge-synthesizer.github.io/
+ *
+ * Copyright 2018-2023, various authors, as described in the GitHub
+ * transaction log.
+ *
+ * Surge XT is released under the GNU General Public Licence v3
+ * or later (GPL-3.0-or-later). The license is found in the "LICENSE"
+ * file in the root of this repository, or at
+ * https://www.gnu.org/licenses/gpl-3.0.en.html
+ *
+ * Surge was a commercial product from 2004-2018, copyright and ownership
+ * held by Claes Johanson at Vember Audio during that period.
+ * Claes made Surge open source in September 2018.
+ *
+ * All source for Surge XT is available at
+ * https://github.com/surge-synthesizer/surge
+ */
 #include <random>
+
 #include "SpringReverbProc.h"
-#include "utilities/FastMath.h"
+#include "sst/basic-blocks/dsp/FastMath.h"
 
 namespace
 {
@@ -81,8 +103,11 @@ void SpringReverbProc::setParams(const Params &params, int numSamples)
 
     auto apfG = 0.5f - 0.4f * params.spin;
     float apfGVec alignas(16)[4] = {apfG, -apfG, apfG, -apfG};
+    VecType apfGVecAsVecType = 0;
+    for (int i = 0; i < 4; ++i)
+        apfGVecAsVecType[i] = apfGVec[i];
     for (auto &apf : vecAPFs)
-        apf.setParams(msToSamples(0.35f + 3.0f * params.size), _mm_load_ps(apfGVec));
+        apf.setParams(msToSamples(0.35f + 3.0f * params.size), apfGVecAsVecType);
 
     constexpr float dampFreqLow = 4000.0f;
     constexpr float dampFreqHigh = 18000.0f;
@@ -107,7 +132,7 @@ void SpringReverbProc::processBlock(float *left, float *right, const int numSamp
     }
 
     auto doSpringInput = [=](int ch, float input, int n) -> float {
-        auto output = Surge::DSP::fasttanh(input - feedbackGain * delay.popSample(ch));
+        auto output = sst::basic_blocks::dsp::fasttanh(input - feedbackGain * delay.popSample(ch));
         return dcBlocker.processSample<StateVariableFilterType::Highpass>(ch, output) +
                shortShakeBuffer[n];
     };

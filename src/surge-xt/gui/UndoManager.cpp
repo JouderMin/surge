@@ -1,17 +1,24 @@
 /*
-** Surge Synthesizer is Free and Open Source Software
-**
-** Surge is made available under the Gnu General Public License, v3.0
-** https://www.gnu.org/licenses/gpl-3.0.en.html
-**
-** Copyright 2004-2022 by various individuals as described by the Git transaction log
-**
-** All source at: https://github.com/surge-synthesizer/surge.git
-**
-** Surge was a commercial product from 2004-2018, with Copyright and ownership
-** in that period held by Claes Johanson at Vember Audio. Claes made Surge
-** open source in September 2018.
-*/
+ * Surge XT - a free and open source hybrid synthesizer,
+ * built by Surge Synth Team
+ *
+ * Learn more at https://surge-synthesizer.github.io/
+ *
+ * Copyright 2018-2023, various authors, as described in the GitHub
+ * transaction log.
+ *
+ * Surge XT is released under the GNU General Public Licence v3
+ * or later (GPL-3.0-or-later). The license is found in the "LICENSE"
+ * file in the root of this repository, or at
+ * https://www.gnu.org/licenses/gpl-3.0.en.html
+ *
+ * Surge was a commercial product from 2004-2018, copyright and ownership
+ * held by Claes Johanson at Vember Audio during that period.
+ * Claes made Surge open source in September 2018.
+ *
+ * All source for Surge XT is available at
+ * https://github.com/surge-synthesizer/surge
+ */
 
 #include "UndoManager.h"
 #include "SurgeGUIEditor.h"
@@ -95,6 +102,7 @@ struct UndoManagerImpl
         int scene;
         int type;
         std::vector<UndoParam> undoParamValues;
+        std::vector<UndoModulation> undoModulations;
     };
     struct UndoWavetable
     {
@@ -167,12 +175,15 @@ struct UndoManagerImpl
         size_t dataSz{0};
         fs::path path{};
     };
-
+    struct UndoFilterAnalysisMovement
+    {
+        UndoParam cutoff, resonance;
+    };
     // If you add a new type here add it both to aboutTheSameThing, toString, and
     // to undo.
     typedef std::variant<UndoParam, UndoModulation, UndoOscillator, UndoOscillatorExtraConfig,
                          UndoWavetable, UndoFX, UndoStep, UndoMSEG, UndoFormula, UndoRename,
-                         UndoMacro, UndoTuning, UndoPatch, UndoFullLFO>
+                         UndoMacro, UndoTuning, UndoPatch, UndoFullLFO, UndoFilterAnalysisMovement>
         UndoAction;
     struct UndoRecord
     {
@@ -422,8 +433,10 @@ struct UndoManagerImpl
 
     void populateUndoParamFromP(const Parameter *p, pdata val, UndoParam &r)
     {
-        char txt[256];
-        synth->getParameterName(synth->idForParameter(p), txt);
+        std::string txt;
+        char buf[TXT_SIZE];
+        synth->getParameterName(synth->idForParameter(p), buf);
+        txt = buf;
         r.name = txt;
         r.temposync = p->temposync;
         r.absolute = p->absolute;
@@ -440,16 +453,16 @@ struct UndoManagerImpl
 
         if (p->ctrltype == vt_float)
         {
-            p->get_display(txt, true, val.f);
+            txt = p->get_display(true, val.f);
         }
         else if (p->ctrltype == vt_int)
         {
-            p->get_display(txt, true,
-                           Parameter::intScaledToFloat(val.i, p->val_max.i, p->val_min.i));
+            txt = p->get_display(true,
+                                 Parameter::intScaledToFloat(val.i, p->val_max.i, p->val_min.i));
         }
         else
         {
-            sprintf(txt, "%s", (p->val.b ? "On" : "Off"));
+            txt = p->val.b ? "On" : "Off";
         }
 
         r.formattedValue = txt;
@@ -482,12 +495,11 @@ struct UndoManagerImpl
         else
             pushRedo(r);
     }
-    void pushModulationChange(int paramId, const Parameter *p, modsources modsource, int sc,
-                              int idx, float val, bool muted, UndoManager::Target to)
+    void populateUndoModulation(int paramId, const Parameter *p, modsources modsource, int sc,
+                                int idx, float val, bool muted, UndoModulation &r)
     {
-        auto r = UndoModulation();
         r.paramId = paramId;
-        char txt[256];
+        char txt[TXT_SIZE];
         synth->getParameterName(synth->idForParameter(p), txt);
         r.target_name = txt;
         r.source_name = modsource_names[modsource];
@@ -496,6 +508,13 @@ struct UndoManagerImpl
         r.scene = sc;
         r.index = idx;
         r.muted = muted;
+    }
+
+    void pushModulationChange(int paramId, const Parameter *p, modsources modsource, int sc,
+                              int idx, float val, bool muted, UndoManager::Target to)
+    {
+        auto r = UndoModulation();
+        populateUndoModulation(paramId, p, modsource, sc, idx, val, muted, r);
 
         if (to == UndoManager::UNDO)
             pushUndo(r);
@@ -519,6 +538,28 @@ struct UndoManagerImpl
             pu.paramId = p->id;
             populateUndoParamFromP(p, p->val, pu);
             r.undoParamValues.emplace_back(pu);
+
+            if (synth->isModDestUsed(p->id))
+            {
+                for (int ms = 1; ms < n_modsources; ms++)
+                {
+                    for (int sc = 0; sc < n_scenes; ++sc)
+                    {
+                        auto indices =
+                            synth->getModulationIndicesBetween(p->id, (modsources)ms, sc);
+                        for (auto idx : indices)
+                        {
+                            auto mr = UndoModulation();
+                            float val = synth->getModDepth01(p->id, (modsources)ms, sc, idx);
+                            bool muted = synth->isModulationMuted(p->id, (modsources)ms, sc, idx);
+                            populateUndoModulation(p->id, p, (modsources)ms, sc, idx, val, muted,
+                                                   mr);
+                            r.undoModulations.push_back(mr);
+                        }
+                    }
+                }
+            }
+
             p++;
         }
 
@@ -743,6 +784,24 @@ struct UndoManagerImpl
             pushRedo(r);
     }
 
+    void pushFilterAnalysisMovement(int cutoffParamId, const Parameter *cutoff_p,
+                                    int resonanceParamId, const Parameter *resonance_p,
+                                    UndoManager::Target to = UndoManager::UNDO)
+    {
+        auto r = UndoFilterAnalysisMovement();
+        r.cutoff = UndoParam();
+        r.cutoff.paramId = cutoffParamId;
+        r.resonance = UndoParam();
+        r.resonance.paramId = resonanceParamId;
+        populateUndoParamFromP(cutoff_p, cutoff_p->val, r.cutoff);
+        populateUndoParamFromP(resonance_p, resonance_p->val, r.resonance);
+
+        if (to == UndoManager::UNDO)
+            pushUndo(r);
+        else
+            pushRedo(r);
+    }
+
     bool undoRedoImpl(UndoManager::Target which)
     {
         auto dcroug = DontClearRedoOnUndoGuard(this);
@@ -798,6 +857,12 @@ struct UndoManagerImpl
             {
                 restoreParamToEditor(&qp);
             }
+
+            for (const auto &qp : p->undoModulations)
+            {
+                editor->setModulationFromUndo(qp.paramId, qp.ms, qp.scene, qp.index, qp.val,
+                                              qp.muted);
+            }
             auto ann = fmt::format("{} Oscillator Type to {}, Scene {} Oscillator {}", verb,
                                    osc_type_names[p->type], (char)('A' + p->scene), p->oscNum + 1);
             editor->enqueueAccessibleAnnouncement(ann);
@@ -825,7 +890,7 @@ struct UndoManagerImpl
 
             if (!p->displayName.empty())
             {
-                strncpy(os->wavetable_display_name, p->displayName.c_str(), 256);
+                os->wavetable_display_name = p->displayName;
             }
             if (p->current_id >= 0)
             {
@@ -1023,6 +1088,19 @@ struct UndoManagerImpl
             editor->enqueueAccessibleAnnouncement(ann);
             return true;
         }
+        if (auto p = std::get_if<UndoFilterAnalysisMovement>(&q))
+        {
+            pushFilterAnalysisMovement(
+                p->cutoff.paramId, synth->storage.getPatch().param_ptr[p->cutoff.paramId],
+                p->resonance.paramId, synth->storage.getPatch().param_ptr[p->resonance.paramId],
+                opposite);
+            auto g = SelfPushGuard(this);
+            restoreParamToEditor(&p->cutoff);
+            restoreParamToEditor(&p->resonance);
+            auto ann = fmt::format("{} Parameter Value, {}", verb, "Filter Analysis Movement");
+            editor->enqueueAccessibleAnnouncement(ann);
+            return true;
+        }
 
         return false;
     }
@@ -1150,6 +1228,12 @@ void UndoManager::pushOscillatorExtraConfig(int scene, int oscnum)
 bool UndoManager::canUndo() { return !impl->undoStack.empty(); }
 
 bool UndoManager::canRedo() { return !impl->redoStack.empty(); }
+void UndoManager::pushFilterAnalysisMovement(int cutoffParamId, const Parameter *cutoff_p,
+                                             int resonanceParamId, const Parameter *resonance_p,
+                                             UndoManager::Target to)
+{
+    impl->pushFilterAnalysisMovement(cutoffParamId, cutoff_p, resonanceParamId, resonance_p, to);
+}
 } // namespace GUI
 
 } // namespace Surge

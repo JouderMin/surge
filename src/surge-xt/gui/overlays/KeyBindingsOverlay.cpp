@@ -1,21 +1,31 @@
 /*
- ** Surge Synthesizer is Free and Open Source Software
- **
- ** Surge is made available under the Gnu General Public License, v3.0
- ** https://www.gnu.org/licenses/gpl-3.0.en.html
- **
- ** Copyright 2004-2022 by various individuals as described by the Git transaction log
- **
- ** All source at: https://github.com/surge-synthesizer/surge.git
- **
- ** Surge was a commercial product from 2004-2018, with Copyright and ownership
- ** in that period held by Claes Johanson at Vember Audio. Claes made Surge
- ** open source in September 2018.
+ * Surge XT - a free and open source hybrid synthesizer,
+ * built by Surge Synth Team
+ *
+ * Learn more at https://surge-synthesizer.github.io/
+ *
+ * Copyright 2018-2023, various authors, as described in the GitHub
+ * transaction log.
+ *
+ * Surge XT is released under the GNU General Public Licence v3
+ * or later (GPL-3.0-or-later). The license is found in the "LICENSE"
+ * file in the root of this repository, or at
+ * https://www.gnu.org/licenses/gpl-3.0.en.html
+ *
+ * Surge was a commercial product from 2004-2018, copyright and ownership
+ * held by Claes Johanson at Vember Audio during that period.
+ * Claes made Surge open source in September 2018.
+ *
+ * All source for Surge XT is available at
+ * https://github.com/surge-synthesizer/surge
  */
 
 #include "KeyBindingsOverlay.h"
 #include <SurgeJUCELookAndFeel.h>
+#include "widgets/MenuCustomComponents.h"
 #include "RuntimeFont.h"
+#include "UserDefaults.h"
+#include "SurgeSynthEditor.h" // so that we can see juceEditor from SGE, apparently...
 
 #define UNDO_MODEL_IN_DTOR 0
 #define USE_JUCE_TEXTBUTTON 0
@@ -34,6 +44,8 @@ struct KeyBindingsListRow : public juce::Component
     KeyBindingsListRow(Surge::GUI::KeyboardActions a, KeyBindingsOverlay *o, SurgeGUIEditor *ed)
         : action(a), overlay(o), editor(ed)
     {
+        auto storage = editor->getStorage();
+
         active = std::make_unique<juce::ToggleButton>();
         active->setButtonText("");
         active->onStateChange = [this]() {
@@ -68,7 +80,7 @@ struct KeyBindingsListRow : public juce::Component
 
         reset = std::make_unique<Surge::Widgets::SelfDrawButton>("Reset");
         reset->setSkin(editor->currentSkin);
-        reset->setStorage(editor->getStorage());
+        reset->setStorage(storage);
         reset->setAccessible(true);
         reset->onClick = [this]() { resetToDefault(); };
         reset->setTitle(std::string("Reset ") + Surge::GUI::keyboardActionDescription(action));
@@ -79,7 +91,7 @@ struct KeyBindingsListRow : public juce::Component
 
         learn = std::make_unique<Surge::Widgets::SelfDrawToggleButton>("Learn");
         learn->setSkin(editor->currentSkin);
-        learn->setStorage(editor->getStorage());
+        learn->setStorage(storage);
         learn->setAccessible(true);
         learn->setTitle(std::string("Learn ") + Surge::GUI::keyboardActionDescription(action));
         learn->setDescription(std::string("Learn ") +
@@ -266,6 +278,13 @@ struct KeyBindingsListBoxModel : public juce::ListBoxModel
 KeyBindingsOverlay::KeyBindingsOverlay(SurgeStorage *st, SurgeGUIEditor *ed)
     : storage(st), editor(ed)
 {
+    enum Tags
+    {
+        tag_vkb_layout
+    };
+
+    auto storage = editor->getStorage();
+
     setAccessible(true);
     setTitle("Keyboard Shortcut Editor");
     setDescription("Keyboard Shortcut Editor");
@@ -280,6 +299,8 @@ KeyBindingsOverlay::KeyBindingsOverlay(SurgeStorage *st, SurgeGUIEditor *ed)
     };
 
     okS->setStorage(storage);
+    okS->setAccessible(true);
+    okS->setTitle("OK");
     addAndMakeVisible(*okS);
 
     cancelS = std::make_unique<Surge::Widgets::SelfDrawButton>("Cancel");
@@ -291,14 +312,32 @@ KeyBindingsOverlay::KeyBindingsOverlay(SurgeStorage *st, SurgeGUIEditor *ed)
     };
 
     cancelS->setStorage(storage);
+    cancelS->setAccessible(true);
+    cancelS->setTitle("Cancel");
     addAndMakeVisible(*cancelS);
 
     resetAll = std::make_unique<Surge::Widgets::SelfDrawButton>("Reset All");
-    resetAll->setSkin(editor->currentSkin);
-    resetAll->setStorage(editor->getStorage());
-    resetAll->setAccessible(true);
+
     resetAll->onClick = [this]() { this->resetAllToDefault(); };
+
+    resetAll->setSkin(editor->currentSkin);
+    resetAll->setStorage(storage);
+    resetAll->setAccessible(true);
+    resetAll->setTitle("Reset all shortcuts to default");
     addAndMakeVisible(*resetAll);
+
+    std::string curVKBLayout = Surge::Storage::getUserDefaultValue(
+        storage, Surge::Storage::VirtualKeyboardLayout, "QWERTY");
+
+    vkbLayout = std::make_unique<Surge::Widgets::SelfDrawButton>("VKB Layout: " + curVKBLayout);
+
+    vkbLayout->onClick = [this]() { this->createVKBLayoutMenu(); };
+
+    vkbLayout->setSkin(editor->currentSkin);
+    vkbLayout->setStorage(storage);
+    vkbLayout->setAccessible(true);
+    vkbLayout->setTitle("Select virtual keyboard layout");
+    addAndMakeVisible(*vkbLayout);
 
     bindingListBoxModel = std::make_unique<KeyBindingsListBoxModel>(this, editor);
     bindingList = std::make_unique<juce::ListBox>("Keyboard Shortcuts", bindingListBoxModel.get());
@@ -314,6 +353,46 @@ void KeyBindingsOverlay::resetAllToDefault()
     }
 
     bindingList->updateContent();
+}
+
+void KeyBindingsOverlay::createVKBLayoutMenu()
+{
+    auto menu = juce::PopupMenu();
+    auto storage = editor->getStorage();
+    auto msurl = storage ? editor->helpURLForSpecial(storage, "virtual-keyboard") : std::string();
+    auto hurl = SurgeGUIEditor::fullyResolvedHelpURL(msurl);
+
+    auto tcomp =
+        std::make_unique<Surge::Widgets::MenuTitleHelpComponent>("Virtual Keyboard Layout", hurl);
+
+    tcomp->setSkin(skin, associatedBitmapStore);
+    tcomp->setCentered(false);
+
+    auto hment = tcomp->getTitle();
+    menu.addCustomItem(-1, std::move(tcomp), nullptr, hment);
+
+    menu.addSeparator();
+
+    std::string curVKBLayout = Surge::Storage::getUserDefaultValue(
+        storage, Surge::Storage::VirtualKeyboardLayout, "QWERTY");
+
+    for (auto item : editor->juceEditor->vkbLayouts)
+    {
+        menu.addItem(item.first, true, (curVKBLayout == item.first),
+                     [this, item]() { changeVKBLayout(item.first); });
+    }
+
+    menu.showMenuAsync(editor->popupMenuOptions());
+}
+
+void KeyBindingsOverlay::changeVKBLayout(const std::string layout)
+{
+    Surge::Storage::updateUserDefaultValue(editor->getStorage(),
+                                           Surge::Storage::VirtualKeyboardLayout, layout);
+    editor->juceEditor->setVKBLayout(layout);
+
+    vkbLayout->setLabels({"VKB Layout: " + layout});
+    vkbLayout->repaint();
 }
 
 KeyBindingsOverlay::~KeyBindingsOverlay()
@@ -353,6 +432,7 @@ void KeyBindingsOverlay::resized()
     okS->setBounds(okRect);
     cancelS->setBounds(canRect);
     resetAll->setBounds(canRect.translated(175, 0).withWidth(58));
+    vkbLayout->setBounds(okRect.translated(-183, 0).withWidth(128));
 
     bindingList->setBounds(l);
 }
@@ -362,6 +442,7 @@ void KeyBindingsOverlay::onSkinChanged()
     okS->setSkin(skin, associatedBitmapStore);
     cancelS->setSkin(skin, associatedBitmapStore);
     resetAll->setSkin(skin, associatedBitmapStore);
+    vkbLayout->setSkin(skin, associatedBitmapStore);
 
     repaint();
 }

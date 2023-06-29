@@ -1,16 +1,23 @@
 /*
- ** Surge Synthesizer is Free and Open Source Software
- **
- ** Surge is made available under the Gnu General Public License, v3.0
- ** https://www.gnu.org/licenses/gpl-3.0.en.html
- **
- ** Copyright 2004-2021 by various individuals as described by the Git transaction log
- **
- ** All source at: https://github.com/surge-synthesizer/surge.git
- **
- ** Surge was a commercial product from 2004-2018, with Copyright and ownership
- ** in that period held by Claes Johanson at Vember Audio. Claes made Surge
- ** open source in September 2018.
+ * Surge XT - a free and open source hybrid synthesizer,
+ * built by Surge Synth Team
+ *
+ * Learn more at https://surge-synthesizer.github.io/
+ *
+ * Copyright 2018-2023, various authors, as described in the GitHub
+ * transaction log.
+ *
+ * Surge XT is released under the GNU General Public Licence v3
+ * or later (GPL-3.0-or-later). The license is found in the "LICENSE"
+ * file in the root of this repository, or at
+ * https://www.gnu.org/licenses/gpl-3.0.en.html
+ *
+ * Surge was a commercial product from 2004-2018, copyright and ownership
+ * held by Claes Johanson at Vember Audio during that period.
+ * Claes made Surge open source in September 2018.
+ *
+ * All source for Surge XT is available at
+ * https://github.com/surge-synthesizer/surge
  */
 
 #include "LuaEditors.h"
@@ -766,25 +773,22 @@ void FormulaModulatorEditor::escapeKeyPressed()
 {
     if (controlArea->applyS->isEnabled())
     {
-        auto cb = juce::ModalCallbackFunction::create([this](int okcs) {
-            if (okcs)
+        auto cb = [this]() {
+            auto c = getParentComponent();
+            while (c)
             {
-                auto c = getParentComponent();
-                while (c)
+                if (auto olw = dynamic_cast<OverlayWrapper *>(c))
                 {
-                    if (auto olw = dynamic_cast<OverlayWrapper *>(c))
-                    {
-                        olw->onClose();
-                        return;
-                    }
+                    olw->onClose();
+                    return;
                 }
             }
-        });
+        };
 
-        juce::AlertWindow::showOkCancelBox(juce::AlertWindow::NoIcon, "Close Formula Editor",
-                                           "Do you really want to close the formula editor? Any "
-                                           "changes that were not applied will be lost!",
-                                           "Yes", "No", nullptr, cb);
+        editor->alertYesNo("Close Formula Editor",
+                           "Do you really want to close the formula editor? Any "
+                           "changes that were not applied will be lost!",
+                           nullptr, cb);
     }
     else
     {
@@ -854,8 +858,9 @@ struct WavetablePreviewComponent : juce::Component
 };
 
 WavetableEquationEditor::WavetableEquationEditor(SurgeGUIEditor *ed, SurgeStorage *s,
-                                                 OscillatorStorage *os, Surge::GUI::Skin::ptr_t sk)
-    : CodeEditorContainerWithApply(ed, s, sk, true), osc(os)
+                                                 OscillatorStorage *os,
+                                                 Surge::GUI::Skin::ptr_t skin)
+    : CodeEditorContainerWithApply(ed, s, skin, true), osc(os)
 {
     if (osc->wavetable_formula == "")
     {
@@ -899,7 +904,7 @@ WavetableEquationEditor::WavetableEquationEditor(SurgeGUIEditor *ed, SurgeStorag
     generate->addListener(this);
     addAndMakeVisible(generate.get());
 
-    renderer = std::make_unique<WavetablePreviewComponent>(storage, osc, sk);
+    renderer = std::make_unique<WavetablePreviewComponent>(storage, osc, skin);
     addAndMakeVisible(renderer.get());
 
     currentFrame = std::make_unique<juce::Slider>("currF");
@@ -989,7 +994,7 @@ void WavetableEquationEditor::buttonClicked(juce::Button *button)
                                                    respt, nfr, wh, &wd);
         storage->waveTableDataMutex.lock();
         osc->wt.BuildWT(wd, wh, wh.flags & wtf_is_sample);
-        snprintf(osc->wavetable_display_name, 256, "Scripted Wavetable");
+        osc->wavetable_display_name = "Scripted Wavetable";
         storage->waveTableDataMutex.unlock();
 
         delete[] wd;

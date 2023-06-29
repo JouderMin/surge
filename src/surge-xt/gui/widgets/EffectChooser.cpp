@@ -1,3 +1,24 @@
+/*
+ * Surge XT - a free and open source hybrid synthesizer,
+ * built by Surge Synth Team
+ *
+ * Learn more at https://surge-synthesizer.github.io/
+ *
+ * Copyright 2018-2023, various authors, as described in the GitHub
+ * transaction log.
+ *
+ * Surge XT is released under the GNU General Public Licence v3
+ * or later (GPL-3.0-or-later). The license is found in the "LICENSE"
+ * file in the root of this repository, or at
+ * https://www.gnu.org/licenses/gpl-3.0.en.html
+ *
+ * Surge was a commercial product from 2004-2018, copyright and ownership
+ * held by Claes Johanson at Vember Audio during that period.
+ * Claes made Surge open source in September 2018.
+ *
+ * All source for Surge XT is available at
+ * https://github.com/surge-synthesizer/surge
+ */
 #include "EffectChooser.h"
 /*
 ** Surge Synthesizer is Free and Open Source Software
@@ -26,18 +47,17 @@ namespace Surge
 namespace Widgets
 {
 
-std::array<int, n_fx_slots> displayOrder{
-    fxslot_ains1,   fxslot_ains2,   fxslot_ains3,   fxslot_ains4,
-
-    fxslot_bins1,   fxslot_bins2,   fxslot_bins3,   fxslot_bins4,
-
-    fxslot_send1,   fxslot_send2,   fxslot_send3,   fxslot_send4,
-
-    fxslot_global1, fxslot_global2, fxslot_global3, fxslot_global4,
-};
+std::array<int, n_fx_slots> fxIndexToDisplayPosition{-1};
 
 EffectChooser::EffectChooser() : juce::Component(), WidgetBaseMixin<EffectChooser>(this)
 {
+    if (fxIndexToDisplayPosition[0] == -1)
+    {
+        for (int i = 0; i < n_fx_slots; ++i)
+        {
+            fxIndexToDisplayPosition[fxslot_order[i]] = i;
+        }
+    }
     setRepaintsOnMouseActivity(true);
     setAccessible(true);
     setFocusContainerType(juce::Component::FocusContainerType::focusContainer);
@@ -45,19 +65,34 @@ EffectChooser::EffectChooser() : juce::Component(), WidgetBaseMixin<EffectChoose
     for (int i = 0; i < n_fx_slots; ++i)
     {
         fxTypes[i] = fxt_off;
-        auto mapi = displayOrder[i];
+        auto mapi = fxslot_order[i];
         auto q =
             std::make_unique<OverlayAsAccessibleButton<EffectChooser>>(this, fxslot_names[mapi]);
         q->setBounds(getEffectRectangle(mapi));
         q->onPress = [this, mapi](auto *t) {
             this->currentEffect = mapi;
+            this->currentClicked = mapi;
             this->notifyValueChanged();
         };
         q->onReturnKey = [this, mapi](auto *t) {
             this->currentEffect = mapi;
+            this->currentClicked = mapi;
             this->notifyValueChanged();
             return true;
         };
+        q->onMenuKey = [this, mapi](auto *t) {
+            this->currentEffect = mapi;
+            this->currentClicked = mapi;
+            this->notifyValueChanged();
+            this->createFXMenu();
+            return true;
+        };
+        q->onGetIsChecked = [this, mapi](auto *t) {
+            if (this->currentEffect == mapi)
+                return true;
+            return false;
+        };
+
         addAndMakeVisible(*q);
         slotAccOverlays[i] = std::move(q);
     }
@@ -150,7 +185,7 @@ void EffectChooser::resized()
     int i = 0;
     for (const auto &q : slotAccOverlays)
     {
-        q->setBounds(getEffectRectangle(displayOrder[i]));
+        q->setBounds(getEffectRectangle(fxslot_order[i]));
         i++;
     }
 }
@@ -233,13 +268,25 @@ juce::Rectangle<int> EffectChooser::getEffectRectangle(int i)
     return r;
 }
 
+void EffectChooser::toggleSelectedDeactivation()
+{
+    storage->getPatch().isDirty = true;
+    deactivatedBitmask ^= (1 << currentClicked);
+    notifyValueChanged();
+}
+
+void EffectChooser::setEffectSlotDeactivation(int slotIdx, bool state)
+{
+    storage->getPatch().isDirty = true;
+    deactivatedBitmask ^= (-(int)state ^ deactivatedBitmask) & (1UL << slotIdx);
+    notifyValueChanged();
+}
+
 void EffectChooser::mouseDoubleClick(const juce::MouseEvent &event)
 {
     if (!event.mods.isPopupMenu() && !hasDragged && currentClicked >= 0)
     {
-        storage->getPatch().isDirty = true;
-        deactivatedBitmask ^= (1 << currentClicked);
-        notifyValueChanged();
+        toggleSelectedDeactivation();
     }
 }
 
@@ -299,6 +346,7 @@ void EffectChooser::createFXMenu()
         auto c = localPointToGlobal(getEffectRectangle(currentClicked).getBottomLeft());
 
         auto where = sge->frame->getLocalPoint(nullptr, c);
+        sge->fxMenu->populateForContext(true);
         sge->fxMenu->menu.showMenuAsync(sge->popupMenuOptions(where));
     }
 }
@@ -342,6 +390,32 @@ void EffectChooser::mouseUp(const juce::MouseEvent &event)
 
         hasDragged = false;
         repaint();
+    }
+    else
+    {
+        if (event.mods.isAltDown())
+        {
+            for (int i = 0; i < n_fx_slots; ++i)
+            {
+                auto r = getEffectRectangle(i);
+
+                if (r.contains(event.getPosition()))
+                {
+                    auto sge = firstListenerOfType<SurgeGUIEditor>();
+
+                    if (sge)
+                    {
+                        // setting both source and target to the same FX slot ID
+                        // and using FX reorder mode NONE will delete the FX
+                        sge->swapFX(i, i, SurgeSynthesizer::FXReorderMode::NONE);
+                        currentEffect = i;
+                        notifyValueChanged();
+
+                        repaint();
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -512,6 +586,23 @@ void EffectChooser::getColorsForSlot(int fxslot, juce::Colour &bgcol, juce::Colo
                 txtcol = skin->getColor(Colors::Effect::Grid::Unselected::Text);
             }
         }
+    }
+}
+
+void EffectChooser::setEffectType(int index, int type)
+{
+    fxTypes[index] = type;
+
+    auto mapi = fxIndexToDisplayPosition[index];
+    auto &ol = slotAccOverlays[mapi];
+
+    if (ol && ol->getAccessibilityHandler())
+    {
+        std::string newd = std::string(fxslot_names[index]) + ": " + fx_type_names[type];
+        ol->setTitle(newd);
+        ol->setDescription(newd);
+        ol->getAccessibilityHandler()->notifyAccessibilityEvent(
+            juce::AccessibilityEvent::titleChanged);
     }
 }
 

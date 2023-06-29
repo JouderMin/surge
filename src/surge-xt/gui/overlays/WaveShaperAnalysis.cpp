@@ -1,17 +1,24 @@
 /*
-** Surge Synthesizer is Free and Open Source Software
-**
-** Surge is made available under the Gnu General Public License, v3.0
-** https://www.gnu.org/licenses/gpl-3.0.en.html
-**
-** Copyright 2004-2020 by various individuals as described by the Git transaction log
-**
-** All source at: https://github.com/surge-synthesizer/surge.git
-**
-** Surge was a commercial product from 2004-2018, with Copyright and ownership
-** in that period held by Claes Johanson at Vember Audio. Claes made Surge
-** open source in September 2018.
-*/
+ * Surge XT - a free and open source hybrid synthesizer,
+ * built by Surge Synth Team
+ *
+ * Learn more at https://surge-synthesizer.github.io/
+ *
+ * Copyright 2018-2023, various authors, as described in the GitHub
+ * transaction log.
+ *
+ * Surge XT is released under the GNU General Public Licence v3
+ * or later (GPL-3.0-or-later). The license is found in the "LICENSE"
+ * file in the root of this repository, or at
+ * https://www.gnu.org/licenses/gpl-3.0.en.html
+ *
+ * Surge was a commercial product from 2004-2018, copyright and ownership
+ * held by Claes Johanson at Vember Audio during that period.
+ * Claes made Surge open source in September 2018.
+ *
+ * All source for Surge XT is available at
+ * https://github.com/surge-synthesizer/surge
+ */
 
 #include "WaveShaperAnalysis.h"
 #include "RuntimeFont.h"
@@ -30,6 +37,10 @@ void WaveShaperAnalysis::resized() {}
 
 void WaveShaperAnalysis::paint(juce::Graphics &g)
 {
+    auto lb = getLocalBounds().transformedBy(getTransform().inverted());
+    auto width = lb.getWidth();
+    auto height = lb.getHeight();
+
     if (sliderDrivenCurve.empty() || lastDbValue != getDbValue() || lastPFG != getPFG())
     {
         recalcFromSlider();
@@ -42,10 +53,9 @@ void WaveShaperAnalysis::paint(juce::Graphics &g)
     auto xf = juce::AffineTransform()
                   .translated(0, -1.0)
                   .scaled(1, -0.5)
-                  .scaled(getWidth(), getHeight())
+                  .scaled(width, height)
                   .translated(sideOne, 2 + top)
-                  .scaled((getWidth() - sideOne - sideTwo) / getWidth(),
-                          (getHeight() - 4.0 - top) / getHeight());
+                  .scaled((width - sideOne - sideTwo) / width, (height - 4.0 - top) / height);
 
     auto re = juce::Rectangle<float>{0, -1, 1, 2}.transformedBy(xf);
 
@@ -140,7 +150,7 @@ void WaveShaperAnalysis::paint(juce::Graphics &g)
     g.setColour(skin->getColor(Colors::MSEGEditor::Grid::Primary));
     g.drawRect(re);
 
-    auto txtr = getLocalBounds().withHeight(top - 6);
+    auto txtr = lb.withHeight(top - 6);
     std::ostringstream title;
     title << sst::waveshapers::wst_names[(int)wstype];
 

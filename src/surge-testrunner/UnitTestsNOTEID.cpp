@@ -1,10 +1,31 @@
+/*
+ * Surge XT - a free and open source hybrid synthesizer,
+ * built by Surge Synth Team
+ *
+ * Learn more at https://surge-synthesizer.github.io/
+ *
+ * Copyright 2018-2023, various authors, as described in the GitHub
+ * transaction log.
+ *
+ * Surge XT is released under the GNU General Public Licence v3
+ * or later (GPL-3.0-or-later). The license is found in the "LICENSE"
+ * file in the root of this repository, or at
+ * https://www.gnu.org/licenses/gpl-3.0.en.html
+ *
+ * Surge was a commercial product from 2004-2018, copyright and ownership
+ * held by Claes Johanson at Vember Audio during that period.
+ * Claes made Surge open source in September 2018.
+ *
+ * All source for Surge XT is available at
+ * https://github.com/surge-synthesizer/surge
+ */
 #include <iostream>
 #include <iomanip>
 #include <sstream>
 #include <algorithm>
 
 #include "HeadlessUtils.h"
-#include "catch2/catch2.hpp"
+#include "catch2/catch_amalgamated.hpp"
 
 TEST_CASE("Note ID in Poly Mode Basics", "[noteid]")
 {
@@ -40,6 +61,7 @@ TEST_CASE("Note ID in Poly Mode Basics", "[noteid]")
         surge->process();
         REQUIRE(surge->hostNoteEndedDuringBlockCount == 0);
     }
+
     SECTION("Dual Distinct On Off, Long Sustain")
     {
         auto surge = Surge::Headless::createSurge(48000);
@@ -89,7 +111,7 @@ TEST_CASE("Note ID in Poly Mode Basics", "[noteid]")
         REQUIRE(surge->endedHostNoteOriginalKey[0] == 60);
     }
 
-    SECTION("Dual Mode, Differeing Sustaing")
+    SECTION("Dual Mode, Differing Sustain")
     {
         auto surge = Surge::Headless::createSurge(48000);
         surge->storage.getPatch().scenemode.val.i = sm_dual;
@@ -194,7 +216,7 @@ TEST_CASE("Note ID in Poly Mode Basics", "[noteid]")
     }
 }
 
-TEST_CASE("Sustain Pedal in Poly Mode", "[noteid]")
+TEST_CASE("Sustain Pedal In Poly Mode", "[noteid]")
 {
     SECTION("Distinct Notes")
     {
@@ -299,7 +321,7 @@ TEST_CASE("Sustain Pedal in Poly Mode", "[noteid]")
 
 TEST_CASE("Overlapping Notes", "[noteid]")
 {
-    SECTION("5 notes overlap; no id on release")
+    SECTION("5 Notes Overlap; No ID on Release")
     {
         auto surge = Surge::Headless::createSurge(48000);
         surge->process();
@@ -351,7 +373,7 @@ TEST_CASE("Overlapping Notes", "[noteid]")
         }
     }
 
-    SECTION("5 notes overlap; release with id")
+    SECTION("5 Notes Overlap; Release With ID")
     {
         auto surge = Surge::Headless::createSurge(48000);
         surge->process();
@@ -419,7 +441,7 @@ TEST_CASE("Mono Modes", "[noteid]")
          * [ voice stack empty]
          */
 
-        DYNAMIC_SECTION("One note hammer on off in mode " << play_mode_names[mode])
+        DYNAMIC_SECTION("One Note Hammer On Off in Mode " << play_mode_names[mode])
         {
             auto surge = Surge::Headless::createSurge(48000);
             REQUIRE(surge);
@@ -458,8 +480,16 @@ TEST_CASE("Mono Modes", "[noteid]")
                     if (v->state.gate)
                     {
                         ct++;
-                        REQUIRE(v->host_note_id == nidbase); // it is re-used
-                        REQUIRE(v->originating_host_key == 60);
+                        if (mode == pm_mono || mode == pm_mono_fp)
+                        {
+                            REQUIRE(v->host_note_id == nidbase + 1); // it is re-triggered
+                            REQUIRE(v->originating_host_key == 61);
+                        }
+                        else
+                        {
+                            REQUIRE(v->host_note_id == nidbase); // it is re-used
+                            REQUIRE(v->originating_host_key == 60);
+                        }
                     }
                 }
                 REQUIRE(ct == 1);
@@ -468,8 +498,18 @@ TEST_CASE("Mono Modes", "[noteid]")
                 {
                     sawOne = true;
                     REQUIRE(surge->hostNoteEndedDuringBlockCount == 1);
-                    REQUIRE(surge->endedHostNoteIds[0] == nidbase + 1);
-                    REQUIRE(surge->endedHostNoteOriginalKey[0] == 61);
+
+                    if (mode == pm_mono || mode == pm_mono_fp)
+                    {
+                        // Retrigger so original ends
+                        REQUIRE(surge->endedHostNoteIds[0] == nidbase);
+                        REQUIRE(surge->endedHostNoteOriginalKey[0] == 60);
+                    }
+                    else
+                    {
+                        REQUIRE(surge->endedHostNoteIds[0] == nidbase + 1);
+                        REQUIRE(surge->endedHostNoteOriginalKey[0] == 61);
+                    }
                 }
             }
             REQUIRE(sawOne);
@@ -485,8 +525,16 @@ TEST_CASE("Mono Modes", "[noteid]")
                     if (v->state.gate)
                     {
                         ct++;
-                        REQUIRE(v->host_note_id == nidbase); // it is re-used
-                        REQUIRE(v->originating_host_key == 60);
+                        if (mode == pm_mono || mode == pm_mono_fp)
+                        {
+                            REQUIRE(v->host_note_id == nidbase + 1); // it is re-triggered
+                            REQUIRE(v->originating_host_key == 61);
+                        }
+                        else
+                        {
+                            REQUIRE(v->host_note_id == nidbase); // it is re-used
+                            REQUIRE(v->originating_host_key == 60);
+                        }
                     }
                 }
                 REQUIRE(ct == 1);
@@ -508,14 +556,22 @@ TEST_CASE("Mono Modes", "[noteid]")
                     sawOne = true;
                     REQUIRE(surge->hostNoteEndedDuringBlockCount == 1);
                     // We kill the recycled
-                    REQUIRE(surge->endedHostNoteIds[0] == nidbase);
-                    REQUIRE(surge->endedHostNoteOriginalKey[0] == 60);
+                    if (mode == pm_mono || mode == pm_mono_fp)
+                    {
+                        REQUIRE(surge->endedHostNoteIds[0] == nidbase + 1);
+                        REQUIRE(surge->endedHostNoteOriginalKey[0] == 61);
+                    }
+                    else
+                    {
+                        REQUIRE(surge->endedHostNoteIds[0] == nidbase);
+                        REQUIRE(surge->endedHostNoteOriginalKey[0] == 60);
+                    }
                 }
             }
             REQUIRE(sawOne);
         }
 
-        DYNAMIC_SECTION("Three Note hammer on off in mode " << play_mode_names[mode])
+        DYNAMIC_SECTION("Three Note Hammer On Off in Mode " << play_mode_names[mode])
         {
             auto surge = Surge::Headless::createSurge(48000);
             REQUIRE(surge);
@@ -554,8 +610,16 @@ TEST_CASE("Mono Modes", "[noteid]")
                     if (v->state.gate)
                     {
                         ct++;
-                        REQUIRE(v->host_note_id == nidbase); // it is re-used
-                        REQUIRE(v->originating_host_key == 60);
+                        if (mode == pm_mono || mode == pm_mono_fp)
+                        {
+                            REQUIRE(v->host_note_id == nidbase + 1); // it is re-used
+                            REQUIRE(v->originating_host_key == 61);
+                        }
+                        else
+                        {
+                            REQUIRE(v->host_note_id == nidbase); // it is re-used
+                            REQUIRE(v->originating_host_key == 60);
+                        }
                     }
                 }
                 REQUIRE(ct == 1);
@@ -564,8 +628,16 @@ TEST_CASE("Mono Modes", "[noteid]")
                 {
                     sawOne = true;
                     REQUIRE(surge->hostNoteEndedDuringBlockCount == 1);
-                    REQUIRE(surge->endedHostNoteIds[0] == nidbase + 1);
-                    REQUIRE(surge->endedHostNoteOriginalKey[0] == 61);
+                    if (mode == pm_mono || mode == pm_mono_fp)
+                    {
+                        REQUIRE(surge->endedHostNoteIds[0] == nidbase);
+                        REQUIRE(surge->endedHostNoteOriginalKey[0] == 60);
+                    }
+                    else
+                    {
+                        REQUIRE(surge->endedHostNoteIds[0] == nidbase + 1);
+                        REQUIRE(surge->endedHostNoteOriginalKey[0] == 61);
+                    }
                 }
             }
             REQUIRE(sawOne);
@@ -582,8 +654,16 @@ TEST_CASE("Mono Modes", "[noteid]")
                     if (v->state.gate)
                     {
                         ct++;
-                        REQUIRE(v->host_note_id == nidbase); // it is re-used
-                        REQUIRE(v->originating_host_key == 60);
+                        if (mode == pm_mono || mode == pm_mono_fp)
+                        {
+                            REQUIRE(v->host_note_id == nidbase + 2); // it is re-triggered
+                            REQUIRE(v->originating_host_key == 63);
+                        }
+                        else
+                        {
+                            REQUIRE(v->host_note_id == nidbase); // it is re-used
+                            REQUIRE(v->originating_host_key == 60);
+                        }
                     }
                 }
                 REQUIRE(ct == 1);
@@ -592,8 +672,16 @@ TEST_CASE("Mono Modes", "[noteid]")
                 {
                     sawOne = true;
                     REQUIRE(surge->hostNoteEndedDuringBlockCount == 1);
-                    REQUIRE(surge->endedHostNoteIds[0] == nidbase + 2);
-                    REQUIRE(surge->endedHostNoteOriginalKey[0] == 63);
+                    if (mode == pm_mono || mode == pm_mono_fp)
+                    {
+                        REQUIRE(surge->endedHostNoteIds[0] == nidbase + 1);
+                        REQUIRE(surge->endedHostNoteOriginalKey[0] == 61);
+                    }
+                    else
+                    {
+                        REQUIRE(surge->endedHostNoteIds[0] == nidbase + 2);
+                        REQUIRE(surge->endedHostNoteOriginalKey[0] == 63);
+                    }
                 }
             }
             REQUIRE(sawOne);
@@ -609,8 +697,16 @@ TEST_CASE("Mono Modes", "[noteid]")
                     if (v->state.gate)
                     {
                         ct++;
-                        REQUIRE(v->host_note_id == nidbase); // it is re-used
-                        REQUIRE(v->originating_host_key == 60);
+                        if (mode == pm_mono || mode == pm_mono_fp)
+                        {
+                            REQUIRE(v->host_note_id == nidbase + 2); // it is re-used
+                            REQUIRE(v->originating_host_key == 63);
+                        }
+                        else
+                        {
+                            REQUIRE(v->host_note_id == nidbase); // it is re-used
+                            REQUIRE(v->originating_host_key == 60);
+                        }
                     }
                 }
                 REQUIRE(ct == 1);
@@ -628,8 +724,16 @@ TEST_CASE("Mono Modes", "[noteid]")
                     if (v->state.gate)
                     {
                         ct++;
-                        REQUIRE(v->host_note_id == nidbase); // it is re-used
-                        REQUIRE(v->originating_host_key == 60);
+                        if (mode == pm_mono || mode == pm_mono_fp)
+                        {
+                            REQUIRE(v->host_note_id == nidbase + 2); // it is re-used
+                            REQUIRE(v->originating_host_key == 63);
+                        }
+                        else
+                        {
+                            REQUIRE(v->host_note_id == nidbase); // it is re-used
+                            REQUIRE(v->originating_host_key == 60);
+                        }
                     }
                 }
                 REQUIRE(ct == 1);
@@ -651,11 +755,59 @@ TEST_CASE("Mono Modes", "[noteid]")
                     sawOne = true;
                     REQUIRE(surge->hostNoteEndedDuringBlockCount == 1);
                     // We kill the recycled
-                    REQUIRE(surge->endedHostNoteIds[0] == nidbase);
-                    REQUIRE(surge->endedHostNoteOriginalKey[0] == 60);
+                    if (mode == pm_mono || mode == pm_mono_fp)
+                    {
+                        REQUIRE(surge->endedHostNoteIds[0] == nidbase + 2);
+                        REQUIRE(surge->endedHostNoteOriginalKey[0] == 63);
+                    }
+                    else
+                    {
+                        REQUIRE(surge->endedHostNoteIds[0] == nidbase);
+                        REQUIRE(surge->endedHostNoteOriginalKey[0] == 60);
+                    }
                 }
             }
             REQUIRE(sawOne);
+        }
+    }
+}
+
+TEST_CASE("Note ID 0 Is Valid", "[noteid]")
+{
+    for (auto nid : {0, 1, 77, std::numeric_limits<int32_t>::max() - 1})
+    {
+        DYNAMIC_SECTION("Note ID " << nid << " Is a Valid Note")
+        {
+            int unid = 0;
+            auto surge = Surge::Headless::createSurge(48000);
+            for (int i = 0; i < 5; ++i)
+                surge->process();
+            surge->playNote(0, 60, 127, 0, unid);
+
+            for (int i = 0; i < 20; ++i)
+            {
+                surge->process();
+                REQUIRE(surge->hostNoteEndedDuringBlockCount == 0);
+                for (auto v : surge->voices[0])
+                {
+                    REQUIRE(v->host_note_id == unid);
+                    REQUIRE(v->originating_host_channel == 0);
+                    REQUIRE(v->originating_host_key == 60);
+                }
+            }
+
+            surge->releaseNote(0, 60, 127);
+            while (!surge->voices[0].empty())
+            {
+                surge->process();
+            }
+            REQUIRE(surge->hostNoteEndedDuringBlockCount == 1);
+            REQUIRE(surge->endedHostNoteIds[0] == unid);
+            REQUIRE(surge->endedHostNoteOriginalChannel[0] == 0);
+            REQUIRE(surge->endedHostNoteOriginalKey[0] == 60);
+
+            surge->process();
+            REQUIRE(surge->hostNoteEndedDuringBlockCount == 0);
         }
     }
 }

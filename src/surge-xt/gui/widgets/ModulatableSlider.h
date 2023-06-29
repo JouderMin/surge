@@ -1,21 +1,29 @@
 /*
-** Surge Synthesizer is Free and Open Source Software
-**
-** Surge is made available under the Gnu General Public License, v3.0
-** https://www.gnu.org/licenses/gpl-3.0.en.html
-**
-** Copyright 2004-2021 by various individuals as described by the Git transaction log
-**
-** All source at: https://github.com/surge-synthesizer/surge.git
-**
-** Surge was a commercial product from 2004-2018, with Copyright and ownership
-** in that period held by Claes Johanson at Vember Audio. Claes made Surge
-** open source in September 2018.
-*/
+ * Surge XT - a free and open source hybrid synthesizer,
+ * built by Surge Synth Team
+ *
+ * Learn more at https://surge-synthesizer.github.io/
+ *
+ * Copyright 2018-2023, various authors, as described in the GitHub
+ * transaction log.
+ *
+ * Surge XT is released under the GNU General Public Licence v3
+ * or later (GPL-3.0-or-later). The license is found in the "LICENSE"
+ * file in the root of this repository, or at
+ * https://www.gnu.org/licenses/gpl-3.0.en.html
+ *
+ * Surge was a commercial product from 2004-2018, copyright and ownership
+ * held by Claes Johanson at Vember Audio during that period.
+ * Claes made Surge open source in September 2018.
+ *
+ * All source for Surge XT is available at
+ * https://github.com/surge-synthesizer/surge
+ */
 
-#ifndef SURGE_XT_MODULATABLESLIDER_H
-#define SURGE_XT_MODULATABLESLIDER_H
+#ifndef SURGE_SRC_SURGE_XT_GUI_WIDGETS_MODULATABLESLIDER_H
+#define SURGE_SRC_SURGE_XT_GUI_WIDGETS_MODULATABLESLIDER_H
 
+#include "ParameterInfowindow.h"
 #include "SkinSupport.h"
 #include "WidgetBaseMixin.h"
 #include "ModulatableControlInterface.h"
@@ -55,6 +63,8 @@ struct ModulatableSlider : public juce::Component,
 
     static MoveRateState sliderMoveRateState;
     static TouchscreenMode touchscreenMode;
+
+    ctrltypes parameterType{ct_none};
 
     /**
      * The slider is 'light' backgrounded (which matters in the classic skin only)
@@ -136,6 +146,8 @@ struct ModulatableSlider : public juce::Component,
 
     SurgeImage *pTray, *pHandle, *pHandleHover, *pTempoSyncHandle, *pTempoSyncHoverHandle;
 
+    std::function<std::string()> customToAccessibleString{nullptr};
+
   private:
     // I know right Here I am using private!
 
@@ -175,6 +187,106 @@ struct ModulatableSlider : public juce::Component,
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ModulatableSlider);
 };
+
+// A "modulatable" slider, that looks like the above class, but *is not* used for modulating a
+// parameter. Basically, use it when you need a slider but it doesn't actually need to be a
+// parameter that you modulate. Fakes all the stuff like drawing, double-click-to-reset, hovering,
+// etc. that the ModulatableSlider gives you.
+struct SelfUpdatingModulatableSlider : public ModulatableSlider,
+                                       public juce::Timer,
+                                       GUI::IComponentTagValue::Listener
+{
+    using CallbackFn = std::function<void(float)>;
+
+    SelfUpdatingModulatableSlider() : ModulatableSlider() { addListener(this); }
+
+    CallbackFn onUpdate = [](float _) {};
+    void setOnUpdate(CallbackFn fn) { onUpdate = std::move(fn); }
+
+    float defaultValue = 0.f;
+    void setDefaultValue(float f)
+    {
+        defaultValue = f;
+        setValue(f);
+    }
+
+    void setValue(float f) override
+    {
+        ModulatableSlider::setValue(f);
+        infoWindow.setLabels("", createDisplayString());
+    }
+
+    void valueChanged(IComponentTagValue *p) override
+    {
+        auto v = getValue();
+        setQuantitizedDisplayValue(v);
+        infoWindow.setLabels("", createDisplayString());
+        onUpdate(v);
+        repaint();
+    }
+
+    int32_t controlModifierClicked(IComponentTagValue *p, const juce::ModifierKeys &mods,
+                                   bool isDoubleClickEvent) override
+    {
+        if (isDoubleClickEvent)
+        {
+            setValue(defaultValue);
+            valueChanged(p);
+        }
+        return 0;
+    }
+
+    void onSkinChanged() override;
+
+    // Pieces that allow for the pop-up hover window to work. If you want the hover information to
+    // appear, you must set the root window that it will appear in (generally either the
+    // SurgeGUIEditor singleton or whatever Overlay this slider is in).
+    //
+    // This should only ever be set once! It will throw otherwise!
+    juce::Component *rootWindow{nullptr};
+    void setRootWindow(juce::Component *root)
+    {
+        if (rootWindow)
+        {
+            throw(std::runtime_error("Attempting to re-set the root window."));
+        }
+        rootWindow = root;
+    }
+
+    void mouseEnter(const juce::MouseEvent &event) override;
+    void mouseExit(const juce::MouseEvent &event) override;
+    void timerCallback() override;
+    bool infoWindowInitialized{false};
+    bool infoWindowShowing{false};
+    ParameterInfowindow infoWindow;
+
+    // Some additional parts to make the informational window a little more nicer.
+    std::string unit{""};
+    void setUnit(const std::string &u)
+    {
+        unit = u;
+        infoWindow.setLabels("", createDisplayString());
+    }
+    std::size_t precision{0};
+    void setPrecision(const std::size_t p)
+    {
+        precision = p;
+        infoWindow.setLabels("", createDisplayString());
+    }
+    float lowEnd{0.f};
+    float highEnd{1.f};
+    void setRange(const float low, const float high)
+    {
+        lowEnd = low;
+        highEnd = high;
+        infoWindow.setLabels("", createDisplayString());
+    }
+    std::string createDisplayString() const;
+
+  private:
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SelfUpdatingModulatableSlider);
+};
+
 } // namespace Widgets
 } // namespace Surge
 #endif // SURGE_XT_MODULATABLESLIDER_H

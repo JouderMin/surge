@@ -1,17 +1,27 @@
 /*
-** Surge Synthesizer is Free and Open Source Software
-**
-** Surge is made available under the Gnu General Public License, v3.0
-** https://www.gnu.org/licenses/gpl-3.0.en.html
-**
-** Copyright 2004-2021 by various individuals as described by the Git transaction log
-**
-** All source at: https://github.com/surge-synthesizer/surge.git
-**
-** Surge was a commercial product from 2004-2018, with Copyright and ownership
-** in that period held by Claes Johanson at Vember Audio. Claes made Surge
-** open source in September 2018.
-*/
+ * Surge XT - a free and open source hybrid synthesizer,
+ * built by Surge Synth Team
+ *
+ * Learn more at https://surge-synthesizer.github.io/
+ *
+ * Copyright 2018-2023, various authors, as described in the GitHub
+ * transaction log.
+ *
+ * Surge XT is released under the GNU General Public Licence v3
+ * or later (GPL-3.0-or-later). The license is found in the "LICENSE"
+ * file in the root of this repository, or at
+ * https://www.gnu.org/licenses/gpl-3.0.en.html
+ *
+ * Surge was a commercial product from 2004-2018, copyright and ownership
+ * held by Claes Johanson at Vember Audio during that period.
+ * Claes made Surge open source in September 2018.
+ *
+ * All source for Surge XT is available at
+ * https://github.com/surge-synthesizer/surge
+ */
+
+#include <iostream>
+#include <fmt/core.h>
 
 #include "ModulatableSlider.h"
 #include "SurgeGUIEditor.h"
@@ -593,6 +603,9 @@ void ModulatableSlider::mouseDoubleClick(const juce::MouseEvent &event)
 void ModulatableSlider::mouseWheelMove(const juce::MouseEvent &event,
                                        const juce::MouseWheelDetails &wheel)
 {
+    if (editTypeWas == DRAG)
+        return;
+
     /*
      * If I choose based on horiz/vert it only works on trackpads, so just add
      */
@@ -672,10 +685,21 @@ struct ModulatableSliderAH : public juce::AccessibilityHandler
         }
         virtual juce::String getCurrentValueAsString() const override
         {
+            if (slider->customToAccessibleString)
+            {
+                return slider->customToAccessibleString();
+            }
             auto sge = slider->firstListenerOfType<SurgeGUIEditor>();
             if (sge)
             {
-                return sge->getDisplayForTag(slider->getTag());
+                if (slider->isEditingModulation)
+                {
+                    return sge->getAccessibleModulationVoiceover(slider->getTag());
+                }
+                else
+                {
+                    return sge->getDisplayForTag(slider->getTag());
+                }
             }
             return std::to_string(slider->getValue());
         }
@@ -789,8 +813,36 @@ bool ModulatableSlider::keyPressed(const juce::KeyPress &key)
         dv *= 0.1;
         break;
     case Quantized:
-        // the value set handler handles this, oddly
+    {
+        /* the value set handler handles this, oddly. But we
+         * can fake it. This code should all go in XT2 of course.
+         * I apologize for this code but it adds a super useful
+         * accessibility function without rewriting the whole shebang.
+         * This basically does a linear search across the parameter bind
+         * to find the next step.
+         */
+        if (parameterType != ct_none)
+        {
+            Parameter pp;
+            pp.ctrltype = parameterType;
+            pp.valtype = vt_float;
+            pp.set_type(parameterType);
+            auto v = getValue();
+            auto sv = 0.005 * (action == Increase ? 1 : -1);
+            pp.set_value_f01(v, true);
+            auto fv = pp.val.f;
+            while (v <= 1.f && v >= 0.f)
+            {
+                v += sv;
+                pp.set_value_f01(v, true);
+                if (pp.val.f != fv)
+                    break;
+            }
+            value = v;
+            dv = 0;
+        }
         break;
+    }
     }
 
     if (isEditingModulation)
@@ -820,6 +872,63 @@ bool ModulatableSlider::keyPressed(const juce::KeyPress &key)
     notifyEndEdit();
     repaint();
     return true;
+}
+
+void SelfUpdatingModulatableSlider::mouseEnter(const juce::MouseEvent &event)
+{
+    ModulatableSlider::mouseEnter(event);
+    if (!infoWindowInitialized && rootWindow)
+    {
+        infoWindowInitialized = true;
+        rootWindow->addChildComponent(infoWindow);
+        infoWindow.setOpaque(true);
+    }
+    if (infoWindowInitialized)
+    {
+        startTimer(500);
+    }
+}
+
+void SelfUpdatingModulatableSlider::mouseExit(const juce::MouseEvent &event)
+{
+    ModulatableSlider::mouseExit(event);
+    stopTimer();
+    if (infoWindowShowing)
+    {
+        infoWindowShowing = false;
+        infoWindow.setVisible(false);
+    }
+}
+
+void SelfUpdatingModulatableSlider::timerCallback()
+{
+    if (!infoWindowShowing)
+    {
+        infoWindowShowing = true;
+        stopTimer();
+        infoWindow.getParentComponent()->toFront(false);
+        infoWindow.toFront(false);
+        infoWindow.setBoundsToAccompany(
+            rootWindow->getLocalArea(this, getLocalBounds()),
+            rootWindow->getLocalBounds().transformedBy(rootWindow->getTransform().inverted()));
+        infoWindow.setVisible(true);
+    }
+}
+
+void SelfUpdatingModulatableSlider::onSkinChanged()
+{
+    ModulatableSlider::onSkinChanged();
+    infoWindow.setSkin(skin, associatedBitmapStore);
+}
+
+std::string SelfUpdatingModulatableSlider::createDisplayString() const
+{
+    float scaled = juce::jmap(getValue(), lowEnd, highEnd);
+    if (precision == 0)
+    {
+        return fmt::format("{}{}", static_cast<int>(scaled), unit);
+    }
+    return fmt::format("{:.{}f}{}", scaled, precision, unit);
 }
 
 } // namespace Widgets

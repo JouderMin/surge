@@ -1,3 +1,24 @@
+/*
+ * Surge XT - a free and open source hybrid synthesizer,
+ * built by Surge Synth Team
+ *
+ * Learn more at https://surge-synthesizer.github.io/
+ *
+ * Copyright 2018-2023, various authors, as described in the GitHub
+ * transaction log.
+ *
+ * Surge XT is released under the GNU General Public Licence v3
+ * or later (GPL-3.0-or-later). The license is found in the "LICENSE"
+ * file in the root of this repository, or at
+ * https://www.gnu.org/licenses/gpl-3.0.en.html
+ *
+ * Surge was a commercial product from 2004-2018, copyright and ownership
+ * held by Claes Johanson at Vember Audio during that period.
+ * Claes made Surge open source in September 2018.
+ *
+ * All source for Surge XT is available at
+ * https://github.com/surge-synthesizer/surge
+ */
 #include "UserDefaults.h"
 #include "SurgeStorage.h"
 
@@ -36,6 +57,12 @@ std::string defaultKeyToString(DefaultKey k)
     case MPEPitchBendRange:
         r = "mpePitchBendRange";
         break;
+    case UseCh2Ch3ToPlayScenesIndividually:
+        r = "useCh2Ch3ToPlayScenesIndividually";
+        break;
+    case MenuBasedMIDILearnChannel:
+        r = "menuBasedMIDILearnChannel";
+        break;
     case RestoreMSEGSnapFromPatch:
         r = "restoreMSEGSnapFromPatch";
         break;
@@ -60,6 +87,9 @@ std::string defaultKeyToString(DefaultKey k)
         break;
     case ShowGhostedLFOWaveReference:
         r = "showGhostedLFOWaveReference";
+        break;
+    case ShowCPUUsage:
+        r = "showCPUUsage";
         break;
     case Use3DWavetableView:
         r = "use3DWavetableView";
@@ -112,6 +142,9 @@ std::string defaultKeyToString(DefaultKey k)
     case ShowVirtualKeyboard_Standalone:
         r = "showVirtualKeyboardStandalone";
         break;
+    case VirtualKeyboardLayout:
+        r = "virtualKeyboardLayout";
+        break;
     case InitialPatchName:
         r = "initialPatchName";
         break;
@@ -133,6 +166,7 @@ std::string defaultKeyToString(DefaultKey k)
     case LastWavetablePath:
         r = "lastWavetablePath";
         break;
+    // TODO: remove in XT2
     case TabKeyArmsModulators:
         r = "tabKeyArmsModulators";
         break;
@@ -172,6 +206,9 @@ std::string defaultKeyToString(DefaultKey k)
     case FilterAnalysisOverlayLocation:
         r = "filterAnalysisOverlayLocation";
         break;
+    case OscilloscopeOverlayLocation:
+        r = "oscilloscopeOverlayLocation";
+        break;
 
     case TuningOverlayLocationTearOut:
         r = "tuningOverlayLocationTearOut";
@@ -190,6 +227,9 @@ std::string defaultKeyToString(DefaultKey k)
         break;
     case FilterAnalysisOverlayLocationTearOut:
         r = "filterAnalysisOverlayLocationTearOut";
+        break;
+    case OscilloscopeOverlayLocationTearOut:
+        r = "oscilloscopeOverlayLocationTearOut";
         break;
 
     case TuningOverlaySizeTearOut:
@@ -210,6 +250,9 @@ std::string defaultKeyToString(DefaultKey k)
     case FilterAnalysisOverlaySizeTearOut:
         r = "filterAnalysisOverlaySizeTearOut";
         break;
+    case OscilloscopeOverlaySizeTearOut:
+        r = "oscilloscopeOverlaySizeTearOut";
+        break;
 
     case TuningOverlayTearOutAlwaysOnTop:
         r = "tuningOverlayTearOutAlwaysOnTop";
@@ -229,6 +272,31 @@ std::string defaultKeyToString(DefaultKey k)
     case FilterAnalysisOverlayTearOutAlwaysOnTop:
         r = "filterAnalysisOverlayTearOutAlwaysOnTop";
         break;
+    case OscilloscopeOverlayTearOutAlwaysOnTop:
+        r = "oscilloscopeOverlayTearOutAlwaysOnTop";
+        break;
+
+    case TuningOverlayTearOutAlwaysOnTop_Plugin:
+        r = "tuningOverlayTearOutAlwaysOnTop_Plugin";
+        break;
+    case ModlistOverlayTearOutAlwaysOnTop_Plugin:
+        r = "modlistOverlayTearOutAlwaysOnTop_Plugin";
+        break;
+    case MSEGOverlayTearOutAlwaysOnTop_Plugin:
+        r = "msegOverlayTearOutAlwaysOnTop_Plugin";
+        break;
+    case FormulaOverlayTearOutAlwaysOnTop_Plugin:
+        r = "formulaOverlayTearOutAlwaysOnTop_Plugin";
+        break;
+    case WSAnalysisOverlayTearOutAlwaysOnTop_Plugin:
+        r = "wsAnalysisOverlayTearOutAlwaysOnTop_Plugin";
+        break;
+    case FilterAnalysisOverlayTearOutAlwaysOnTop_Plugin:
+        r = "filterAnalysisOverlayTearOutAlwaysOnTop_Plugin";
+        break;
+    case OscilloscopeOverlayTearOutAlwaysOnTop_Plugin:
+        r = "oscilloscopeOverlayTearOutAlwaysOnTop_Plugin";
+        break;
 
     case ModListValueDisplay:
         r = "modListValueDisplay";
@@ -240,13 +308,51 @@ std::string defaultKeyToString(DefaultKey k)
     case UseNarratorAnnouncements:
         r = "useNarratorAnnouncements";
         break;
+    case UseNarratorAnnouncementsForPatchTypeahead:
+        r = "useNarratorAnnouncementsForPatchTypeahead";
+        break;
 
     case FXUnitAssumeFixedBlock:
         r = "fxAssumeFixedBlock";
         break;
+    case FXUnitDefaultZoom:
+        r = "fxUnitDefaultZoom";
+        break;
 
     case MenuAndEditKeybindingsFollowKeyboardFocus:
         r = "menuAndEditKeybindingsFollowKeyboardFocus";
+        break;
+
+    case ExpandModMenusWithSubMenus:
+        r = "expandModMenusWithSubmenus";
+        break;
+
+    case FocusModEditorAfterAddModulationFrom:
+        r = "focusModEditorAfterAddModulationFrom";
+        break;
+
+    case IgnoreMIDIProgramChange:
+        r = "ignoreMidiProgramChange";
+        break;
+
+    case DontShowAudioErrorsAgain:
+        r = "dontShowAudioErrorsAgain";
+        break;
+
+    case OSCPortIn:
+        r = "openSoundControlPortIn";
+        break;
+
+    case OSCPortOut:
+        r = "openSoundControlPortOut";
+        break;
+
+    case StartOSCIn:
+        r = "startOSCIn";
+        break;
+
+    case StartOSCOut:
+        r = "startOSCOut";
         break;
 
     case nKeys:

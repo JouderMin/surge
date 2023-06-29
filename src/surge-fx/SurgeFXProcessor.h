@@ -1,14 +1,27 @@
 /*
-  ==============================================================================
+ * Surge XT - a free and open source hybrid synthesizer,
+ * built by Surge Synth Team
+ *
+ * Learn more at https://surge-synthesizer.github.io/
+ *
+ * Copyright 2018-2023, various authors, as described in the GitHub
+ * transaction log.
+ *
+ * Surge XT is released under the GNU General Public Licence v3
+ * or later (GPL-3.0-or-later). The license is found in the "LICENSE"
+ * file in the root of this repository, or at
+ * https://www.gnu.org/licenses/gpl-3.0.en.html
+ *
+ * Surge was a commercial product from 2004-2018, copyright and ownership
+ * held by Claes Johanson at Vember Audio during that period.
+ * Claes made Surge open source in September 2018.
+ *
+ * All source for Surge XT is available at
+ * https://github.com/surge-synthesizer/surge
+ */
 
-    This file was auto-generated!
-
-    It contains the basic framework code for a JUCE plugin processor.
-
-  ==============================================================================
-*/
-
-#pragma once
+#ifndef SURGE_SRC_SURGE_FX_SURGEFXPROCESSOR_H
+#define SURGE_SRC_SURGE_FX_SURGEFXPROCESSOR_H
 
 #include "SurgeStorage.h"
 #include "Effect.h"
@@ -38,6 +51,7 @@ class SurgefxAudioProcessor : public juce::AudioProcessor,
     int output_position{-1};
 
     bool nonLatentBlockMode{true};
+
     //==============================================================================
     void prepareToPlay(double sampleRate, int samplesPerBlock) override;
     void releaseResources() override;
@@ -236,9 +250,7 @@ class SurgefxAudioProcessor : public juce::AudioProcessor,
             return "-";
         }
 
-        char txt[1024];
-        fxstorage->p[fx_param_remap[i]].get_display(txt, false, 0);
-        return txt;
+        return fxstorage->p[fx_param_remap[i]].get_display(false, 0);
     }
 
     std::string getParamValueFor(int idx, float f)
@@ -248,9 +260,7 @@ class SurgefxAudioProcessor : public juce::AudioProcessor,
             return "-";
         }
 
-        char txt[1024];
-        fxstorage->p[fx_param_remap[idx]].get_display(txt, true, f);
-        return txt;
+        return fxstorage->p[fx_param_remap[idx]].get_display(true, f);
     }
 
     std::string getParamValueFromFloat(int i, float f)
@@ -260,10 +270,9 @@ class SurgefxAudioProcessor : public juce::AudioProcessor,
             return "-";
         }
 
-        char txt[1024];
         fxstorage->p[fx_param_remap[i]].set_value_f01(f);
-        fxstorage->p[fx_param_remap[i]].get_display(txt, false, 0);
-        return txt;
+
+        return fxstorage->p[fx_param_remap[i]].get_display(false, 0);
     }
 
     void updateJuceParamsFromStorage();
@@ -325,6 +334,7 @@ class SurgefxAudioProcessor : public juce::AudioProcessor,
     std::atomic<bool> isUserEditing[n_fx_params + 1];
     std::atomic<bool> wasParamFeatureChanged[n_fx_params];
     std::function<void()> paramChangeListener;
+
     float lastBPM = -1;
     bool supressParameterUpdates = false;
     struct SupressGuard
@@ -353,7 +363,10 @@ class SurgefxAudioProcessor : public juce::AudioProcessor,
     void copyGlobaldataSubset(int start, int end);
     void setupStorageRanges(Parameter *start, Parameter *endIncluding);
 
+    std::atomic<bool> audioRunning{false};
+
   public:
+    void prepareParametersAbsentAudio();
     void setParameterByString(int i, const std::string &s);
     float getParameterValueForString(int i, const std::string &s);
     bool canSetParameterByString(int i);
@@ -361,3 +374,5 @@ class SurgefxAudioProcessor : public juce::AudioProcessor,
   private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SurgefxAudioProcessor)
 };
+
+#endif // SURGE_SRC_SURGE_FX_SURGEFXPROCESSOR_H

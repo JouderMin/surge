@@ -1,17 +1,24 @@
 /*
-** Surge Synthesizer is Free and Open Source Software
-**
-** Surge is made available under the Gnu General Public License, v3.0
-** https://www.gnu.org/licenses/gpl-3.0.en.html
-**
-** Copyright 2004-2021 by various individuals as described by the Git transaction log
-**
-** All source at: https://github.com/surge-synthesizer/surge.git
-**
-** Surge was a commercial product from 2004-2018, with Copyright and ownership
-** in that period held by Claes Johanson at Vember Audio. Claes made Surge
-** open source in September 2018.
-*/
+ * Surge XT - a free and open source hybrid synthesizer,
+ * built by Surge Synth Team
+ *
+ * Learn more at https://surge-synthesizer.github.io/
+ *
+ * Copyright 2018-2023, various authors, as described in the GitHub
+ * transaction log.
+ *
+ * Surge XT is released under the GNU General Public Licence v3
+ * or later (GPL-3.0-or-later). The license is found in the "LICENSE"
+ * file in the root of this repository, or at
+ * https://www.gnu.org/licenses/gpl-3.0.en.html
+ *
+ * Surge was a commercial product from 2004-2018, copyright and ownership
+ * held by Claes Johanson at Vember Audio during that period.
+ * Claes made Surge open source in September 2018.
+ *
+ * All source for Surge XT is available at
+ * https://github.com/surge-synthesizer/surge
+ */
 
 #include "SurgeJUCELookAndFeel.h"
 #include "RuntimeFont.h"
@@ -125,6 +132,10 @@ void SurgeJUCELookAndFeel::onSkinChanged()
               skin->getColor(Colors::VirtualKeyboard::OctaveJog::Background));
     setColour(MidiKeyboardComponent::upDownButtonArrowColourId,
               skin->getColor(Colors::VirtualKeyboard::OctaveJog::Arrow));
+
+    setColour(ToggleButton::textColourId, skin->getColor(Colors::Dialog::Label::Text));
+    setColour(ToggleButton::tickColourId, skin->getColor(Colors::Dialog::Checkbox::Tick));
+    setColour(ToggleButton::tickDisabledColourId, skin->getColor(Colors::Dialog::Checkbox::Border));
 }
 
 void SurgeJUCELookAndFeel::drawLabel(Graphics &graphics, Label &label)
@@ -230,16 +241,16 @@ void SurgeJUCELookAndFeel::drawDocumentWindowTitleBar(DocumentWindow &window, Gr
     auto sw = fontSurge.getStringWidth(surgeLabel);
     auto vw = fontVersion.getStringWidth(surgeVersion);
 
-    auto ic = associatedBitmapStore->getImage(IDB_SURGE_ICON);
+    auto icon = associatedBitmapStore->getImage(IDB_SURGE_ICON);
 
     // Surge icon is 12 x 14 so draw that in the center
     auto titleCenter = w / 2;
     auto textMargin = Surge::Build::IsRelease ? 0 : 5;
     auto titleTextWidth = sw + vw + textMargin;
 
-    if (ic)
+    if (icon)
     {
-        ic->drawAt(g, titleCenter - (titleTextWidth / 2) - 14 - textMargin, h / 2 - 7, 1.0);
+        icon->drawAt(g, titleCenter - (titleTextWidth / 2) - 14 - textMargin, h / 2 - 7, 1.0);
     }
 
     auto boxSurge = Rectangle<int>(titleCenter - (titleTextWidth / 2), 0, sw, h);
@@ -466,4 +477,26 @@ void SurgeJUCELookAndFeel::drawPopupMenuSectionHeaderWithOptions(Graphics &graph
                                                                  const PopupMenu::Options &options)
 {
     LookAndFeel_V2::drawPopupMenuSectionHeaderWithOptions(graphics, area, sectionName, options);
+}
+
+void SurgeJUCELookAndFeel::drawToggleButton(Graphics &g, ToggleButton &button,
+                                            bool shouldDrawButtonAsHighlighted,
+                                            bool shouldDrawButtonAsDown)
+{
+    auto tickWidth = jmin(15.0f, (float)button.getHeight() * 0.75f) * 1.2f;
+
+    drawTickBox(g, button, 2.0f, ((float)button.getHeight() - tickWidth) * 0.5f, tickWidth,
+                tickWidth, button.getToggleState(), button.isEnabled(),
+                shouldDrawButtonAsHighlighted, shouldDrawButtonAsDown);
+
+    g.setColour(button.findColour(ToggleButton::textColourId));
+    g.setFont(skin->fontManager->getLatoAtSize(9));
+
+    if (!button.isEnabled())
+        g.setOpacity(0.5f);
+
+    g.drawFittedText(
+        button.getButtonText(),
+        button.getLocalBounds().withTrimmedLeft(roundToInt(tickWidth) + 10).withTrimmedRight(2),
+        Justification::centredLeft, 10);
 }

@@ -1,20 +1,27 @@
 /*
-** Surge Synthesizer is Free and Open Source Software
-**
-** Surge is made available under the Gnu General Public License, v3.0
-** https://www.gnu.org/licenses/gpl-3.0.en.html
-**
-** Copyright 2004-2020 by various individuals as described by the Git transaction log
-**
-** All source at: https://github.com/surge-synthesizer/surge.git
-**
-** Surge was a commercial product from 2004-2018, with Copyright and ownership
-** in that period held by Claes Johanson at Vember Audio. Claes made Surge
-** open source in September 2018.
-*/
+ * Surge XT - a free and open source hybrid synthesizer,
+ * built by Surge Synth Team
+ *
+ * Learn more at https://surge-synthesizer.github.io/
+ *
+ * Copyright 2018-2023, various authors, as described in the GitHub
+ * transaction log.
+ *
+ * Surge XT is released under the GNU General Public Licence v3
+ * or later (GPL-3.0-or-later). The license is found in the "LICENSE"
+ * file in the root of this repository, or at
+ * https://www.gnu.org/licenses/gpl-3.0.en.html
+ *
+ * Surge was a commercial product from 2004-2018, copyright and ownership
+ * held by Claes Johanson at Vember Audio during that period.
+ * Claes made Surge open source in September 2018.
+ *
+ * All source for Surge XT is available at
+ * https://github.com/surge-synthesizer/surge
+ */
 
-#ifndef SURGE_XT_MODMENUCUSTOMCOMPONENT_H
-#define SURGE_XT_MODMENUCUSTOMCOMPONENT_H
+#ifndef SURGE_SRC_SURGE_XT_GUI_WIDGETS_MENUCUSTOMCOMPONENTS_H
+#define SURGE_SRC_SURGE_XT_GUI_WIDGETS_MENUCUSTOMCOMPONENTS_H
 
 #include "juce_gui_basics/juce_gui_basics.h"
 #include "SkinSupport.h"
@@ -62,11 +69,20 @@ struct TinyLittleIconButton : public juce::Component
 
 struct MenuTitleHelpComponent : juce::PopupMenu::CustomComponent, Surge::GUI::SkinConsumingComponent
 {
+    std::string manualAccTag = " (open manual)";
     MenuTitleHelpComponent(const std::string &l, const std::string &u)
         : label(l), url(u), juce::PopupMenu::CustomComponent(false)
     {
-        setTitle(l);
-        setDescription(l);
+        setTitle(l + manualAccTag);
+        setDescription(l + manualAccTag);
+        setAccessible(true);
+    }
+
+    MenuTitleHelpComponent(const std::string &l, const std::string &accL, const std::string &u)
+        : label(l), url(u), juce::PopupMenu::CustomComponent(false)
+    {
+        setTitle(accL + manualAccTag);
+        setDescription(accL + manualAccTag);
         setAccessible(true);
     }
 
@@ -92,11 +108,12 @@ struct MenuTitleHelpComponent : juce::PopupMenu::CustomComponent, Surge::GUI::Sk
 
 struct MenuCenteredBoldLabel : juce::PopupMenu::CustomComponent
 {
-    MenuCenteredBoldLabel(const std::string &s) : label(s), juce::PopupMenu::CustomComponent(true)
+    MenuCenteredBoldLabel(const std::string &s) : label(s), juce::PopupMenu::CustomComponent(false)
     {
         setAccessible(true);
         setTitle(label);
     }
+
     void getIdealSize(int &idealWidth, int &idealHeight) override;
     void paint(juce::Graphics &g) override;
 
@@ -118,9 +135,12 @@ struct ModMenuCustomComponent : juce::PopupMenu::CustomComponent, Surge::GUI::Sk
         CLEAR,
         MUTE
     };
-    ModMenuCustomComponent(const std::string &source, const std::string &amount,
-                           std::function<void(OpType)> callback);
+
+    ModMenuCustomComponent(SurgeStorage *storage, const std::string &source,
+                           const std::string &amount, std::function<void(OpType)> callback,
+                           bool isTarget = false, bool isApplyToAll = false);
     ~ModMenuCustomComponent() noexcept;
+
     void getIdealSize(int &idealWidth, int &idealHeight) override;
     void paint(juce::Graphics &g) override;
     void resized() override;
@@ -133,9 +153,13 @@ struct ModMenuCustomComponent : juce::PopupMenu::CustomComponent, Surge::GUI::Sk
     void mouseUp(const juce::MouseEvent &e) override;
     bool keyPressed(const juce::KeyPress &k) override;
 
+    std::unique_ptr<juce::PopupMenu> createAccessibleSubMenu();
+
     std::unique_ptr<TinyLittleIconButton> clear, mute, edit;
     std::string source, amount;
     std::function<void(OpType)> callback;
+    bool isTarget{false};
+    bool isMenuExpanded{false};
 
     std::unique_ptr<juce::AccessibilityHandler> createAccessibilityHandler() override;
 
@@ -150,9 +174,14 @@ struct ModMenuForAllComponent : ModMenuCustomComponent
         MUTE,
         UNMUTE
     };
-    ModMenuForAllComponent(std::function<void(AllAction)> callback);
+
+    ModMenuForAllComponent(SurgeStorage *storage, std::function<void(AllAction)> callback,
+                           bool isTarget = false);
+
     std::function<void(AllAction)> allCB;
     void mouseUp(const juce::MouseEvent &e) override {}
+
+    std::unique_ptr<juce::PopupMenu> createAccessibleSubMenu();
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ModMenuForAllComponent);
 };

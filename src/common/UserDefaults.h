@@ -1,4 +1,26 @@
-#pragma once
+/*
+ * Surge XT - a free and open source hybrid synthesizer,
+ * built by Surge Synth Team
+ *
+ * Learn more at https://surge-synthesizer.github.io/
+ *
+ * Copyright 2018-2023, various authors, as described in the GitHub
+ * transaction log.
+ *
+ * Surge XT is released under the GNU General Public Licence v3
+ * or later (GPL-3.0-or-later). The license is found in the "LICENSE"
+ * file in the root of this repository, or at
+ * https://www.gnu.org/licenses/gpl-3.0.en.html
+ *
+ * Surge was a commercial product from 2004-2018, copyright and ownership
+ * held by Claes Johanson at Vember Audio during that period.
+ * Claes made Surge open source in September 2018.
+ *
+ * All source for Surge XT is available at
+ * https://github.com/surge-synthesizer/surge
+ */
+#ifndef SURGE_SRC_COMMON_USERDEFAULTS_H
+#define SURGE_SRC_COMMON_USERDEFAULTS_H
 
 #include <string>
 #include <vector>
@@ -21,69 +43,85 @@ namespace Storage
 // streamed as strings so feel free to change the order to whatever you want
 enum DefaultKey
 {
-    HighPrecisionReadouts,
-    SmoothingMode,
-    PitchSmoothingMode,
-    MiddleC,
-    MPEPitchBendRange,
-    RestoreMSEGSnapFromPatch,
-    UserDataPath,
-    UseODDMTS,
-    ActivateExtraOutputs,
-    MonoPedalMode,
-    ShowCursorWhileEditing,
-    TouchMouseMode,
-    ShowGhostedLFOWaveReference,
-    Use3DWavetableView,
+    // these are all the various menu options
+    DefaultZoom,
+
     DefaultSkin,
     DefaultSkinRootType,
-    DefaultZoom,
-    SliderMoveRateState,
-    RememberTabPositionsPerScene,
+    MenuLightness,
+    LayoutGridResolution,
 
-    PatchJogWraparound,
-    RetainPatchSearchboxAfterLoad,
+    HighPrecisionReadouts,
+    ModWindowShowsValues,
+    InfoWindowPopupOnIdle,
+    ShowGhostedLFOWaveReference,
+    ShowCPUUsage,
+    MiddleC,
+
+    UserDataPath,
+
+    SliderMoveRateState,
+    ShowCursorWhileEditing,
+    TouchMouseMode,
+
+    DefaultPatchAuthor,
+    DefaultPatchComment,
+    InitialPatchName,
+    InitialPatchCategory,
+    InitialPatchCategoryType,
+    AppendOriginalPatchBy,
 
     OverrideTuningOnPatchLoad,
     OverrideMappingOnPatchLoad,
 
-    DefaultPatchAuthor,
-    DefaultPatchComment,
-    AppendOriginalPatchBy,
-
-    ModWindowShowsValues,
-    LayoutGridResolution,
-
+    RememberTabPositionsPerScene,
+    RestoreMSEGSnapFromPatch,
+    ActivateExtraOutputs, // TODO: remove in XT2
+    PatchJogWraparound,
+    RetainPatchSearchboxAfterLoad,
+    PromptToLoadOverDirtyPatch,
+    TabKeyArmsModulators, // TODO: remove in XT2
+    UseKeyboardShortcuts_Plugin,
+    UseKeyboardShortcuts_Standalone,
+    MenuAndEditKeybindingsFollowKeyboardFocus,
+    UseNarratorAnnouncements,
+    UseNarratorAnnouncementsForPatchTypeahead,
+    ExpandModMenusWithSubMenus,
+    FocusModEditorAfterAddModulationFrom,
     ShowVirtualKeyboard_Plugin,
     ShowVirtualKeyboard_Standalone,
+    VirtualKeyboardLayout,
 
-    InitialPatchName,
-    InitialPatchCategory,
-    InitialPatchCategoryType,
+    MPEPitchBendRange,
+    PitchSmoothingMode,
+    UseCh2Ch3ToPlayScenesIndividually,
+    MenuBasedMIDILearnChannel,
 
+    SmoothingMode,
+    MonoPedalMode,
+
+    // these are persistent options sprinkled outside of the menu
+    UseODDMTS,
+    Use3DWavetableView,
+    ModListValueDisplay,
+
+    // dialog related stuff
     LastSCLPath,
     LastKBMPath,
     LastWavetablePath,
     LastPatchPath,
 
-    TabKeyArmsModulators,
-    MenuAndEditKeybindingsFollowKeyboardFocus,
-
-    InfoWindowPopupOnIdle,
-
-    UseKeyboardShortcuts_Plugin,
-    UseKeyboardShortcuts_Standalone,
-
     PromptToActivateShortcutsOnAccKeypress,
     PromptToActivateCategoryAndPatchOnKeypress,
-    PromptToLoadOverDirtyPatch,
 
+    // overlay related stuff
     TuningOverlayLocation,
     ModlistOverlayLocation,
     MSEGOverlayLocation,
     FormulaOverlayLocation,
     WSAnalysisOverlayLocation,
     FilterAnalysisOverlayLocation,
+    OscilloscopeOverlayLocation,
 
     TuningOverlayLocationTearOut,
     ModlistOverlayLocationTearOut,
@@ -91,6 +129,7 @@ enum DefaultKey
     FormulaOverlayLocationTearOut,
     WSAnalysisOverlayLocationTearOut,
     FilterAnalysisOverlayLocationTearOut,
+    OscilloscopeOverlayLocationTearOut,
 
     TuningOverlaySizeTearOut,
     ModlistOverlaySizeTearOut,
@@ -98,6 +137,7 @@ enum DefaultKey
     FormulaOverlaySizeTearOut,
     WSAnalysisOverlaySizeTearOut,
     FilterAnalysisOverlaySizeTearOut,
+    OscilloscopeOverlaySizeTearOut,
 
     TuningOverlayTearOutAlwaysOnTop,
     ModlistOverlayTearOutAlwaysOnTop,
@@ -105,14 +145,29 @@ enum DefaultKey
     FormulaOverlayTearOutAlwaysOnTop,
     WSAnalysisOverlayTearOutAlwaysOnTop,
     FilterAnalysisOverlayTearOutAlwaysOnTop,
+    OscilloscopeOverlayTearOutAlwaysOnTop,
 
-    ModListValueDisplay,
-    MenuLightness,
-
-    UseNarratorAnnouncements,
+    TuningOverlayTearOutAlwaysOnTop_Plugin,
+    ModlistOverlayTearOutAlwaysOnTop_Plugin,
+    MSEGOverlayTearOutAlwaysOnTop_Plugin,
+    FormulaOverlayTearOutAlwaysOnTop_Plugin,
+    WSAnalysisOverlayTearOutAlwaysOnTop_Plugin,
+    FilterAnalysisOverlayTearOutAlwaysOnTop_Plugin,
+    OscilloscopeOverlayTearOutAlwaysOnTop_Plugin,
 
     // Surge XT Effects specific defaults
     FXUnitAssumeFixedBlock,
+    FXUnitDefaultZoom,
+
+    IgnoreMIDIProgramChange,
+
+    DontShowAudioErrorsAgain,
+
+    // OSC (Open Sound Control)
+    StartOSCIn,
+    StartOSCOut,
+    OSCPortIn,
+    OSCPortOut,
 
     nKeys
 };
@@ -155,3 +210,5 @@ bool updateUserDefaultValue(SurgeStorage *stoarge, const DefaultKey &key,
 
 } // namespace Storage
 } // namespace Surge
+
+#endif // SURGE_SRC_COMMON_USERDEFAULTS_H

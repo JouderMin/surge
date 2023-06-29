@@ -1,25 +1,33 @@
 /*
-** Surge Synthesizer is Free and Open Source Software
-**
-** Surge is made available under the Gnu General Public License, v3.0
-** https://www.gnu.org/licenses/gpl-3.0.en.html
-**
-** Copyright 2004-2021 by various individuals as described by the Git transaction log
-**
-** All source at: https://github.com/surge-synthesizer/surge.git
-**
-** Surge was a commercial product from 2004-2018, with Copyright and ownership
-** in that period held by Claes Johanson at Vember Audio. Claes made Surge
-** open source in September 2018.
-*/
+ * Surge XT - a free and open source hybrid synthesizer,
+ * built by Surge Synth Team
+ *
+ * Learn more at https://surge-synthesizer.github.io/
+ *
+ * Copyright 2018-2023, various authors, as described in the GitHub
+ * transaction log.
+ *
+ * Surge XT is released under the GNU General Public Licence v3
+ * or later (GPL-3.0-or-later). The license is found in the "LICENSE"
+ * file in the root of this repository, or at
+ * https://www.gnu.org/licenses/gpl-3.0.en.html
+ *
+ * Surge was a commercial product from 2004-2018, copyright and ownership
+ * held by Claes Johanson at Vember Audio during that period.
+ * Claes made Surge open source in September 2018.
+ *
+ * All source for Surge XT is available at
+ * https://github.com/surge-synthesizer/surge
+ */
 
-#ifndef SURGE_XT_OVERLAYWRAPPER_H
-#define SURGE_XT_OVERLAYWRAPPER_H
+#ifndef SURGE_SRC_SURGE_XT_GUI_OVERLAYS_OVERLAYWRAPPER_H
+#define SURGE_SRC_SURGE_XT_GUI_OVERLAYS_OVERLAYWRAPPER_H
 
 #include "SkinSupport.h"
 #include "UserDefaults.h"
 
 #include "juce_gui_basics/juce_gui_basics.h"
+#include "SurgeGUIUtils.h"
 
 class SurgeGUIEditor;
 class SurgeImage;
@@ -77,19 +85,24 @@ struct OverlayWrapper : public juce::Component,
     SurgeImage *icon{nullptr};
     void setIcon(SurgeImage *d) { icon = d; }
 
-    std::tuple<bool, Surge::Storage::DefaultKey, Surge::Storage::DefaultKey> canTearOutData{
-        false, Surge::Storage::nKeys, Surge::Storage::nKeys};
+    // this is can, size key, standalone pin key, plugin pin key
+    typedef std::tuple<bool, Surge::Storage::DefaultKey, Surge::Storage::DefaultKey,
+                       Surge::Storage::DefaultKey>
+        tearoutTuple_t;
+    tearoutTuple_t canTearOutData{false, Surge::Storage::nKeys, Surge::Storage::nKeys,
+                                  Surge::Storage::nKeys};
     bool canTearOut, isAlwaysOnTop;
-    void setCanTearOut(std::tuple<bool, Surge::Storage::DefaultKey, Surge::Storage::DefaultKey> t)
+    // this tuple is can: the sie key,
+    void setCanTearOut(tearoutTuple_t t)
     {
         canTearOutData = t;
         canTearOut = std::get<0>(t);
-        isAlwaysOnTop = Surge::Storage::getUserDefaultValue(storage, std::get<2>(t), false);
+        if (Surge::GUI::getIsStandalone())
+            isAlwaysOnTop = Surge::Storage::getUserDefaultValue(storage, std::get<2>(t), false);
+        else
+            isAlwaysOnTop = Surge::Storage::getUserDefaultValue(storage, std::get<3>(t), true);
     }
-    std::tuple<bool, Surge::Storage::DefaultKey, Surge::Storage::DefaultKey> getCanTearOut()
-    {
-        return canTearOutData;
-    }
+    tearoutTuple_t getCanTearOut() { return canTearOutData; }
 
     std::pair<bool, Surge::Storage::DefaultKey> canTearOutResizePair{false, Surge::Storage::nKeys};
     bool canTearOutResize;

@@ -1,3 +1,24 @@
+/*
+ * Surge XT - a free and open source hybrid synthesizer,
+ * built by Surge Synth Team
+ *
+ * Learn more at https://surge-synthesizer.github.io/
+ *
+ * Copyright 2018-2023, various authors, as described in the GitHub
+ * transaction log.
+ *
+ * Surge XT is released under the GNU General Public Licence v3
+ * or later (GPL-3.0-or-later). The license is found in the "LICENSE"
+ * file in the root of this repository, or at
+ * https://www.gnu.org/licenses/gpl-3.0.en.html
+ *
+ * Surge was a commercial product from 2004-2018, copyright and ownership
+ * held by Claes Johanson at Vember Audio during that period.
+ * Claes made Surge open source in September 2018.
+ *
+ * All source for Surge XT is available at
+ * https://github.com/surge-synthesizer/surge
+ */
 #include "PatchSelector.h"
 /*
 ** Surge Synthesizer is Free and Open Source Software
@@ -26,7 +47,13 @@
 #include "fmt/core.h"
 #include "SurgeJUCEHelpers.h"
 #include "AccessibleHelpers.h"
-#include "SurgeJUCEHelpers.h"
+
+/*
+ * It is an arbitrary number that we set as an ID for patch menu items.
+ * It is not necessarily to be unique among all menu items, only among a sub menu, so it can
+ * be a constant.
+ */
+static constexpr int ID_TO_PRESELECT_MENU_ITEMS = 636133;
 
 namespace Surge
 {
@@ -138,7 +165,7 @@ PatchSelector::PatchSelector() : juce::Component(), WidgetBaseMixin<PatchSelecto
 
     setWantsKeyboardFocus(true);
 };
-PatchSelector::~PatchSelector() = default;
+PatchSelector::~PatchSelector() { typeAhead->removeTypeAheadListener(this); };
 
 void PatchSelector::setStorage(SurgeStorage *s)
 {
@@ -287,7 +314,7 @@ void PatchSelector::mouseEnter(const juce::MouseEvent &)
 
     if (tooltipCountdown < 0)
     {
-        tooltipCountdown = 5;
+        tooltipCountdown = 3;
         juce::Timer::callAfterDelay(100, Surge::GUI::makeSafeCallback<PatchSelector>(
                                              this, [](auto *that) { that->shouldTooltip(); }));
     }
@@ -297,7 +324,7 @@ void PatchSelector::mouseMove(const juce::MouseEvent &e)
 {
     if (tooltipCountdown >= 0)
     {
-        tooltipCountdown = 5;
+        tooltipCountdown = 3;
     }
 
     // todo : apply mouse tolerance here
@@ -357,7 +384,7 @@ void PatchSelector::mouseDown(const juce::MouseEvent &e)
             tooltipCountdown = -1;
             toggleCommentTooltip(false);
 
-            menu.addSectionHeader("FAVORITES");
+            Surge::Widgets::MenuCenteredBoldLabel::addToMenuAsSectionHeader(menu, "FAVORITES");
 
             auto haveFavs = optionallyAddFavorites(menu, false, false);
 
@@ -367,9 +394,12 @@ void PatchSelector::mouseDown(const juce::MouseEvent &e)
 
                 stuckHover = true;
                 menu.showMenuAsync(sge->popupMenuOptions(favoritesRect.getBottomLeft()),
-                                   [this](int) {
-                                       stuckHover = false;
-                                       endHover();
+                                   [that = juce::Component::SafePointer(this)](int) {
+                                       if (that)
+                                       {
+                                           that->stuckHover = false;
+                                           that->endHover();
+                                       }
                                    });
             }
 
@@ -382,11 +412,7 @@ void PatchSelector::mouseDown(const juce::MouseEvent &e)
 
             if (sge)
             {
-                sge->setPatchAsFavorite(isFavorite);
-                std::ostringstream oss;
-                oss << pname << (isFavorite ? " added to " : " removed from ")
-                    << "favorite patches.";
-                sge->enqueueAccessibleAnnouncement(oss.str());
+                sge->setPatchAsFavorite(pname, isFavorite);
                 repaint();
             }
         }
@@ -432,7 +458,7 @@ void PatchSelector::shouldTooltip()
     }
     else
     {
-        juce::Timer::callAfterDelay(200, Surge::GUI::makeSafeCallback<PatchSelector>(
+        juce::Timer::callAfterDelay(100, Surge::GUI::makeSafeCallback<PatchSelector>(
                                              this, [](auto *that) { that->shouldTooltip(); }));
     }
 }
@@ -514,7 +540,8 @@ void PatchSelector::showClassicMenu(bool single_category)
 
         std::transform(menuName.begin(), menuName.end(), menuName.begin(), ::toupper);
 
-        contextMenu.addSectionHeader("PATCHES (" + menuName + ")");
+        Surge::Widgets::MenuCenteredBoldLabel::addToMenuAsSectionHeader(
+            contextMenu, "PATCHES (" + menuName + ")");
 
         populatePatchMenuForCategory(rightMouseCategory, contextMenu, single_category, main_e,
                                      false);
@@ -524,7 +551,8 @@ void PatchSelector::showClassicMenu(bool single_category)
         bool addedFavorites = false;
         if (patch_cat_size && storage->firstThirdPartyCategory > 0)
         {
-            contextMenu.addSectionHeader("FACTORY PATCHES");
+            Surge::Widgets::MenuCenteredBoldLabel::addToMenuAsSectionHeader(contextMenu,
+                                                                            "FACTORY PATCHES");
         }
 
         for (int i = 0; i < patch_cat_size; i++)
@@ -545,7 +573,7 @@ void PatchSelector::showClassicMenu(bool single_category)
                 }
 
                 contextMenu.addColumnBreak();
-                contextMenu.addSectionHeader(txt);
+                Surge::Widgets::MenuCenteredBoldLabel::addToMenuAsSectionHeader(contextMenu, txt);
                 if (favs && optionallyAddFavorites(contextMenu, false))
                     contextMenu.addSeparator();
                 addedFavorites = true;
@@ -572,29 +600,11 @@ void PatchSelector::showClassicMenu(bool single_category)
     }
 
     contextMenu.addColumnBreak();
-    contextMenu.addSectionHeader("FUNCTIONS");
-
-    auto initAction = [this]() {
-        int i = 0;
-
-        bool lookingForFactory = (storage->initPatchCategoryType == "Factory");
-        for (auto p : storage->patch_list)
-        {
-            if (p.name == storage->initPatchName &&
-                storage->patch_category[p.category].name == storage->initPatchCategory &&
-                storage->patch_category[p.category].isFactory == lookingForFactory)
-            {
-                loadPatch(i);
-                break;
-            }
-
-            ++i;
-        }
-    };
+    Surge::Widgets::MenuCenteredBoldLabel::addToMenuAsSectionHeader(contextMenu, "FUNCTIONS");
 
     auto sge = firstListenerOfType<SurgeGUIEditor>();
 
-    contextMenu.addItem(Surge::GUI::toOSCase("Initialize Patch"), initAction);
+    contextMenu.addItem(Surge::GUI::toOSCase("Initialize Patch"), [this]() { loadInitPatch(); });
 
     contextMenu.addItem(Surge::GUI::toOSCase("Set Current Patch as Default"), [this]() {
         Surge::Storage::updateUserDefaultValue(storage, Surge::Storage::InitialPatchName,
@@ -644,6 +654,7 @@ void PatchSelector::showClassicMenu(bool single_category)
                     auto res = c.getResult();
                     auto rString = res.getFullPathName().toStdString();
 
+                    std::cout << "queuePatchFileLoad: " << rString << std::endl;
                     sge->queuePatchFileLoad(rString);
 
                     auto dir =
@@ -671,30 +682,47 @@ void PatchSelector::showClassicMenu(bool single_category)
                         psd->setEnclosingParentTitle("Rename Patch");
                         const auto priorPath = storage->patch_list[current_patch].path;
                         psd->onOK = [this, priorPath]() {
-                            fs::remove(priorPath);
-                            storage->refresh_patchlist();
-                            storage->initializePatchDb(true);
+                            /*
+                             * OK so the database doesn't like deleting files while it is indexing.
+                             * We should fix this (#6793) but for now put the delete action at the
+                             * end of the db processing thread. BUT that will run on the patchdb
+                             * thread so bounce it from here to there and then back here.
+                             */
+                            auto nextStep = [this, priorPath]() {
+                                auto doDelete = [this, priorPath]() {
+                                    fs::remove(priorPath);
+                                    storage->refresh_patchlist();
+                                    storage->initializePatchDb(true);
+                                };
+                                juce::MessageManager::getInstance()->callAsync(doDelete);
+                            };
+                            storage->patchDB->doAfterCurrentQueueDrained(nextStep);
                         };
                     });
             });
 
-            contextMenu.addItem(Surge::GUI::toOSCase("Delete Patch"), [this, initAction]() {
-                auto cb = juce::ModalCallbackFunction::create([this, initAction](int okcs) {
-                    if (okcs)
+            contextMenu.addItem(Surge::GUI::toOSCase("Delete Patch"), [this, sge]() {
+                auto onOk = [this]() {
+                    try
                     {
                         fs::remove(storage->patch_list[current_patch].path);
                         storage->refresh_patchlist();
                         storage->initializePatchDb(true);
-                        initAction();
                     }
-                });
+                    catch (const fs::filesystem_error &e)
+                    {
+                        std::ostringstream oss;
+                        oss << "Experienced filesystem error while deleting patch " << e.what();
+                        storage->reportError(oss.str(), "Filesystem Error");
+                    }
+                    isUser = false;
+                };
 
-                juce::AlertWindow::showOkCancelBox(
-                    juce::AlertWindow::NoIcon, "Delete Patch",
-                    std::string("Do you really want to delete\n") +
-                        storage->patch_list[current_patch].path.u8string() +
-                        "?\n\nThis cannot be undone!",
-                    "Yes", "No", nullptr, cb);
+                sge->alertOKCancel("Delete Patch",
+                                   std::string("Do you really want to delete\n") +
+                                       storage->patch_list[current_patch].path.u8string() +
+                                       "?\nThis cannot be undone!",
+                                   onOk);
             });
         }
 
@@ -712,6 +740,12 @@ void PatchSelector::showClassicMenu(bool single_category)
                         [this]() { this->storage->refresh_patchlist(); });
 
     contextMenu.addSeparator();
+
+    if (current_patch >= 0 && current_patch < storage->patch_list.size() &&
+        storage->patch_list[current_patch].category >= storage->firstUserCategory)
+    {
+        Surge::GUI::addRevealFile(contextMenu, storage->patch_list[current_patch].path);
+    }
 
     contextMenu.addItem(Surge::GUI::toOSCase("Open User Patches Folder..."),
                         [this]() { Surge::GUI::openFileOrFolder(this->storage->userPatchesPath); });
@@ -755,12 +789,16 @@ void PatchSelector::showClassicMenu(bool single_category)
 
     if (sge)
     {
-        o = sge->popupMenuOptions(getBounds().getBottomLeft());
+        o = sge->popupMenuOptions(getBounds().getBottomLeft())
+                .withInitiallySelectedItem(ID_TO_PRESELECT_MENU_ITEMS);
     }
 
-    contextMenu.showMenuAsync(o, [this](int) {
-        stuckHover = false;
-        endHover();
+    contextMenu.showMenuAsync(o, [that = juce::Component::SafePointer(this)](int) {
+        if (that)
+        {
+            that->stuckHover = false;
+            that->endHover();
+        }
     });
 }
 
@@ -791,7 +829,7 @@ bool PatchSelector::optionallyAddFavorites(juce::PopupMenu &p, bool addColumnBre
     if (addColumnBreak)
     {
         p.addColumnBreak();
-        p.addSectionHeader("FAVORITES");
+        Surge::Widgets::MenuCenteredBoldLabel::addToMenuAsSectionHeader(p, "FAVORITES");
     }
 
     if (addToSubMenu)
@@ -1015,6 +1053,9 @@ bool PatchSelector::populatePatchMenuForCategory(int c, juce::PopupMenu &context
             auto item = juce::PopupMenu::Item(name).setEnabled(true).setTicked(thisCheck).setAction(
                 [this, p]() { this->loadPatch(p); });
 
+            if (thisCheck)
+                item.setID(ID_TO_PRESELECT_MENU_ITEMS);
+
             if (isFav && associatedBitmapStore)
             {
                 auto img = associatedBitmapStore->getImage(IDB_FAVORITE_MENU_ICON);
@@ -1030,7 +1071,7 @@ bool PatchSelector::populatePatchMenuForCategory(int c, juce::PopupMenu &context
 
                 if (single_category)
                 {
-                    subMenu->addSectionHeader("");
+                    Surge::Widgets::MenuCenteredBoldLabel::addToMenuAsSectionHeader(*subMenu, "");
                 }
             }
         }
@@ -1077,7 +1118,11 @@ bool PatchSelector::populatePatchMenuForCategory(int c, juce::PopupMenu &context
 
         if (!single_category)
         {
-            contextMenu.addSubMenu(name, *subMenu, true, nullptr, amIChecked);
+            if (amIChecked)
+                contextMenu.addSubMenu(name, *subMenu, true, nullptr, amIChecked,
+                                       ID_TO_PRESELECT_MENU_ITEMS);
+            else
+                contextMenu.addSubMenu(name, *subMenu, true, nullptr, amIChecked);
         }
 
         main_e++;
@@ -1099,6 +1144,25 @@ void PatchSelector::loadPatch(int id)
     }
 }
 
+void PatchSelector::loadInitPatch()
+{
+    int i = 0;
+    bool lookingForFactory = (storage->initPatchCategoryType == "Factory");
+
+    for (auto p : storage->patch_list)
+    {
+        if (p.name == storage->initPatchName &&
+            storage->patch_category[p.category].name == storage->initPatchCategory &&
+            storage->patch_category[p.category].isFactory == lookingForFactory)
+        {
+            loadPatch(i);
+            break;
+        }
+
+        ++i;
+    }
+}
+
 int PatchSelector::getCurrentPatchId() const { return current_patch; }
 
 int PatchSelector::getCurrentCategoryId() const { return current_category; }
@@ -1112,6 +1176,23 @@ void PatchSelector::itemSelected(int providerIndex)
     {
         sge->queuePatchFileLoad(sr.file);
     }
+}
+
+void PatchSelector::itemFocused(int providerIndex)
+{
+#if WINDOWS
+    auto sge = firstListenerOfType<SurgeGUIEditor>();
+    if (!sge)
+        return;
+
+    auto sr = patchDbProvider->lastSearchResult[providerIndex];
+    auto doAcc = Surge::Storage::getUserDefaultValue(
+        storage, Surge::Storage::UseNarratorAnnouncementsForPatchTypeahead, true);
+    if (doAcc)
+    {
+        sge->enqueueAccessibleAnnouncement(sr.name + " in " + sr.cat);
+    }
+#endif
 }
 
 void PatchSelector::idle() { wasTypeaheadCanceledSinceLastIdle = false; }
@@ -1173,7 +1254,7 @@ void PatchSelector::toggleTypeAheadSearch(bool b)
         if (storage->patchDB->numberOfJobsOutstanding() > 0)
         {
             enable = false;
-            txt = "Updating Patch Database: " +
+            txt = "Updating patch database: " +
                   std::to_string(storage->patchDB->numberOfJobsOutstanding()) + " items left";
         }
 
@@ -1201,7 +1282,10 @@ void PatchSelector::toggleTypeAheadSearch(bool b)
 
         if (!enable)
         {
-            juce::Timer::callAfterDelay(250, [this]() { this->enableTypeAheadIfReady(); });
+            juce::Timer::callAfterDelay(250, [that = juce::Component::SafePointer(this)]() {
+                if (that)
+                    that->enableTypeAheadIfReady();
+            });
         }
         else
         {
@@ -1253,12 +1337,26 @@ void PatchSelector::enableTypeAheadIfReady()
     }
     else
     {
-        juce::Timer::callAfterDelay(250, [this]() { this->enableTypeAheadIfReady(); });
+        juce::Timer::callAfterDelay(250, [that = juce::Component::SafePointer(this)]() {
+            if (that)
+                that->enableTypeAheadIfReady();
+        });
     }
 }
 
 bool PatchSelector::keyPressed(const juce::KeyPress &key)
 {
+    if (isTypeaheadSearchOn && storage->patchDB->numberOfJobsOutstanding() > 0)
+    {
+        // Any keypress while we are waiting is ignored other than perhaps escape
+        if (key.getKeyCode() == juce::KeyPress::escapeKey)
+        {
+            toggleTypeAheadSearch(false);
+            repaint();
+        }
+        return true;
+    }
+
     auto [action, mod] = Surge::Widgets::accessibleEditAction(key, storage);
 
     if (action == OpenMenu)
@@ -1330,36 +1428,46 @@ void PatchSelectorCommentTooltip::paint(juce::Graphics &g)
     g.fillRect(getLocalBounds().reduced(1));
     g.setColour(skin->getColor(clr::Text));
     g.setFont(skin->fontManager->getLatoAtSize(9));
-    printf("Popup width: %d\n", getWidth());
     g.drawMultiLineText(comment, 5, g.getCurrentFont().getHeight() + 2, getWidth(),
                         juce::Justification::left);
 }
 
 void PatchSelectorCommentTooltip::positionForComment(const juce::Point<int> &centerPoint,
-                                                     const std::string &c, const int maxWidth)
+                                                     const std::string &c,
+                                                     const int maxTooltipWidth)
 {
     comment = c;
 
     std::stringstream ss(comment);
     std::string to;
 
-    int idx = 0;
+    int numLines = 0;
 
     auto ft = skin->fontManager->getLatoAtSize(9);
-    auto width = 0;
+    auto width = 0.f;
 
     while (std::getline(ss, to, '\n'))
     {
-        auto w = ft.getStringWidth(to);
+        auto w = ft.getStringWidthFloat(to);
+
+        // in case of an empty line, we still need to count it as an extra row
+        // so bump it up a bit so that the rows calculation ceils to 1
+        if (w == 0.f)
+        {
+            w = 1.f;
+        }
+
+        auto rows = std::ceil(w / (float)maxTooltipWidth);
+
         width = std::max(w, width);
-        idx++;
+        numLines += (int)rows;
     }
 
-    auto height = std::max(idx * (ft.getHeight() + 2), 30.f);
+    auto height = std::max(numLines * (ft.getHeight() + 2), 30.f);
 
     auto r = juce::Rectangle<int>()
                  .withCentre(juce::Point(centerPoint.x, centerPoint.y))
-                 .withSizeKeepingCentre(std::min(width + 12, maxWidth), height)
+                 .withSizeKeepingCentre(std::min(width, (float)maxTooltipWidth), height)
                  .translated(0, height / 2);
 
     setBounds(r);

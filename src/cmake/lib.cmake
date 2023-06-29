@@ -4,10 +4,6 @@ file(MAKE_DIRECTORY ${SURGE_PRODUCT_DIR})
 
 add_custom_target(surge-xt-distribution)
 add_custom_target(surge-staged-assets)
-add_custom_command(TARGET surge-xt-distribution
-  POST_BUILD
-  COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_SOURCE_DIR}/resources/surge-xt/README.txt ${SURGE_PRODUCT_DIR}
-  )
 
 function(surge_juce_package target product_name)
   get_target_property(output_dir ${target} RUNTIME_OUTPUT_DIRECTORY)
@@ -59,12 +55,15 @@ function(surge_juce_package target product_name)
     if(TARGET ${target}_VST3)
       install(DIRECTORY "${output_dir}/VST3/${product_name}.vst3" DESTINATION ${CMAKE_INSTALL_LIBDIR}/vst3)
     endif()
+    if(TARGET ${target}_CLAP)
+      install(PROGRAMS "${output_dir}/CLAP/${product_name}.clap" DESTINATION ${CMAKE_INSTALL_LIBDIR}/clap)
+    endif()
     install(DIRECTORY "${CMAKE_SOURCE_DIR}/resources/data/" DESTINATION share/surge-xt)
   endif()
 endfunction()
 
 function(surge_add_lib_subdirectory libname)
-  add_subdirectory(${CMAKE_SOURCE_DIR}/libs/${libname} ${CMAKE_BINARY_DIR}/libs/${libname} EXCLUDE_FROM_ALL)
+  add_subdirectory(${SURGE_SOURCE_DIR}/libs/${libname} ${CMAKE_BINARY_DIR}/libs/${libname} EXCLUDE_FROM_ALL)
 endfunction()
 
 function(surge_make_installers)
@@ -88,6 +87,7 @@ function(surge_make_installers)
     run_installer_script(installer_mac/make_installer.sh)
     add_custom_command(TARGET surge-xt-distribution
       POST_BUILD
+      USES_TERMINAL
       WORKING_DIRECTORY ${SURGE_PRODUCT_DIR}
       COMMAND zip -r ${SURGE_XT_DIST_OUTPUT_DIR}/surge-xt-macos-${SXTVER}-pluginsonly.zip .
       )
